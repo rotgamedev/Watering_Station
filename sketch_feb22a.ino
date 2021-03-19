@@ -893,9 +893,7 @@ void loop()
 {
   unsigned long currentMillis = millis();
   BtnCheck();
-
-  int activeValue[4]={atoi(f1_active), atoi(f2_active), atoi(f3_active), atoi(f4_active)};
-
+  
   if (currentMillis - prevOledTime >= oledRefreshTime)  //wykonuje się co interwal
   {
     prevOledTime = currentMillis;
@@ -920,13 +918,10 @@ void loop()
       {
         mqttState=true;
         publishAirData(temp,humidity,lux);
-        for (int i = 0; i <= 3; i++)
-        {
-          if(activeValue[i]==1)
-          {
-            publishFlowerData(i+1);
-          }
-        }
+        publishFlowerData(1);
+        publishFlowerData(2);
+        publishFlowerData(3);
+        publishFlowerData(4);
         Serial.println("Message send");
       }
       else
