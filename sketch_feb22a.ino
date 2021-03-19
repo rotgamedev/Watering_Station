@@ -185,7 +185,18 @@ void ReadMqttConfig(){
           strcpy(mqtt_username, json["mqtt_username"]);
           strcpy(mqtt_password, json["mqtt_password"]);
           
-          isMqttConfig=true;
+          String serverIP=mqtt_server;
+          String deviceName=friendly_name;
+          
+          if (serverIP=="" || serverIP==NULL || deviceName=="" || deviceName==NULL)
+          {
+            isMqttConfig=false;
+          }
+          else
+          {
+            isMqttConfig=true;
+          }
+          
         }
         else
         {
@@ -682,14 +693,16 @@ void setup() {
   //wylaczenie zmiennej zapisu konfiguracji
   shouldSaveConfig = false;
 
-  mqtt_server_pubsub=mqtt_server;
-  friendly_name_pubsub=friendly_name;
-  mqtt_username_pubsub=mqtt_username;
-  mqtt_password_pubsub=mqtt_password;
+  if (isMqttConfig)
+  {
+    mqtt_server_pubsub=mqtt_server;
+    friendly_name_pubsub=friendly_name;
+    mqtt_username_pubsub=mqtt_username;
+    mqtt_password_pubsub=mqtt_password;
   
-  client.setBufferSize(255);
-  client.setServer(mqtt_server_pubsub.c_str(),atoi(mqtt_port));
-
+    client.setBufferSize(255);
+    client.setServer(mqtt_server_pubsub.c_str(),atoi(mqtt_port));
+  }
   /*if (isFlowerConfig)
   {
     MoistureSensorsRead();
@@ -898,20 +911,23 @@ void loop()
     WateringFlowers();
 
     CheckWifiState();
-    
-    if (client.connect(friendly_name_pubsub.c_str(),mqtt_username_pubsub.c_str(),mqtt_password_pubsub.c_str()))
+
+    if (isMqttConfig)
     {
-      mqttState=true;
-      publishAirData(temp,humidity,lux);
-      publishFlowerData(1);
-      publishFlowerData(2);
-      publishFlowerData(3);
-      publishFlowerData(4);
-      Serial.println("Message send");
-    }
-    else
-    {
-      mqttState=false;
+      if (client.connect(friendly_name_pubsub.c_str(),mqtt_username_pubsub.c_str(),mqtt_password_pubsub.c_str()))
+      {
+        mqttState=true;
+        publishAirData(temp,humidity,lux);
+        publishFlowerData(1);
+        publishFlowerData(2);
+        publishFlowerData(3);
+        publishFlowerData(4);
+        Serial.println("Message send");
+      }
+      else
+      {
+        mqttState=false;
+      }
     }
 
     CheckMQTTState();
