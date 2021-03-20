@@ -1393,22 +1393,31 @@ void WebPage()
             client.println("<!DOCTYPE html><html>");
             client.println("<head><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">");
             client.println("<link rel=\"stylesheet\" href=\"https://use.fontawesome.com/releases/v5.7.2/css/all.css\" integrity=\"sha384-fnmOCqbTlWIlj8LyTjo7mOUStjsKC4pOpQbqyi7RrhN7udi9RwhKkMHpvLbHG9Sr\" crossorigin=\"anonymous\">");                          
-
-            client.println("<style>html { font-family: Arial; display: inline-block; margin: 0px auto; text-align: center;}");
+            client.println("<style>");
+            client.println("*{box-sizing: border-box;}");
+            client.println("html { font-family: Arial; display: inline-block; margin: 0px auto; text-align: center;}");
             client.println("h1 { font-size: 3.0rem;}");    
             client.println("h2 { font-size: 2.0rem;}");
             client.println("p { font-size: 2.0rem;}");
             client.println(".units { font-size: 1.2rem;}");
-            client.println(".labels{ font-size: 1.5rem; vertical-align:middle; padding-bottom: 15px;}</style>");
+            client.println(".labels{ font-size: 1.5rem; vertical-align:middle; padding-bottom: 15px;}");
+            client.println(".column{ float:left; width:50%; padding: 10px;}");
+            client.println(".row:after{ display: table; clear: both;}");
+            client.println("</style>");
             //client.println("<script>function refresh(refreshPeriod){setTimeout(\"location.reload(true);\", refreshPeriod);} window.onload = refresh(30000)</script>");
             client.println("</head>");
             // Web Page Heading
             client.println("<body><h1>Watering Station</h1>");
             client.println("<h2>Air:</h2>");      
+
+            client.println("<div class=\"row\"><div class=\"column\">");
             client.println("<p><i class=\"fas fa-sun\" style=\"color:#f2f20d;\"></i> <span class=\"labels\">Light:</span> <span>"+(String)lux+"</span> <sup class=\"units\">lx</sup></p>");
+            client.println("<p><i class=\"fas fa-water\" style=\"color:#00add6;\"></i> <span class=\"labels\">Water Level:</span> <span>"+(String)waterLvl+"</span> <sup class=\"units\">&percnt;</sup></p>");
+            client.println("</div><div class=\"column\">");
             client.println("<p><i class=\"fas fa-thermometer-half\" style=\"color:#059e8a;\"></i> <span class=\"labels\">Temperature:</span> <span>"+(String)temp+"</span> <sup class=\"units\">&deg;C</sup></p>");
             client.println("<p><i class=\"fas fa-tint\" style=\"color:#00add6;\"></i> <span class=\"labels\">Humidity:</span> <span>"+(String)humidity+"</span> <sup class=\"units\">&percnt;</sup></p>");
-            client.println("<p><i class=\"fas fa-water\" style=\"color:#00add6;\"></i> <span class=\"labels\">Water Level:</span> <span>"+(String)waterLvl+"</span> <sup class=\"units\">&percnt;</sup></p>");
+            client.println("</div></div>");
+            
             client.println("<h2>Flowers:</h2>");
        
             int activeValue[4]={atoi(f1_active), atoi(f2_active), atoi(f3_active), atoi(f4_active)};
