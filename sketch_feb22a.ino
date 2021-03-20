@@ -22,7 +22,7 @@ WiFiManager wifiManager;
 WiFiServer server(80);
 
 // Variable to store the HTTP request
-String header;
+String header;// ="HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n";
 
 //Variable for mqtt
 char friendly_name[40];
@@ -137,6 +137,11 @@ const long oledRefreshTime = 25;
 String wifiState="";
 bool mqttState= false;
 String mqttStateMsg="";
+
+//web
+unsigned long currentTimeWeb = 0;
+unsigned long previousTimeWeb = 0;
+const long timeoutTime=2000;
 
 //metody---------------------------------------------------------------------------
 
@@ -911,15 +916,12 @@ void loop()
   if (currentMillis - previousMillis >= interval)  //wykonuje się co interwal - 10s
   {
     previousMillis = currentMillis;
-    
     TempHumRead(); //oczyte temp wilgotnosci
     LightRead();//oczyte natezenia swiatla
     MoistureSensorsRead(); //odczyt wilgotnosci gleby
     WaterLevelRead();
     WateringFlowers();
-
     CheckWifiState();
-
     if (isMqttConfig)
     {
       if (client.connect(friendly_name_pubsub.c_str(),mqtt_username_pubsub.c_str(),mqtt_password_pubsub.c_str()))
@@ -940,7 +942,6 @@ void loop()
         mqttState=false;
       }
     }
-
     CheckMQTTState();
   }
 
@@ -1339,10 +1340,21 @@ void WebPage()
 {
   WiFiClient client = server.available();   // Listen for incoming clients
 
-  if (client) {                             // If a new client connects,
+  //if (client)
+  if (!client)// If a new client connects,
+  {
+    return;
+  }
+  else
+  {                             
+    currentTimeWeb=millis();
+    previousTimeWeb=currentTimeWeb;
+    
     Serial.println("New Client.");          // print a message out in the serial port
     String currentLine = "";                // make a String to hold incoming data from the client
-    while (client.connected()) {            // loop while the client's connected
+    while (client.connected() && currentTimeWeb - previousTimeWeb <= timeoutTime ) {            // loop while the client's connected
+      currentTimeWeb=millis();
+      
       if (client.available()) {             // if there's bytes to read from the client,
         char c = client.read();             // read a byte, then
         Serial.write(c);                    // print it out the serial monitor
@@ -1358,7 +1370,7 @@ void WebPage()
             client.println("Connection: close");
             client.println();
             
-            // turns the GPIOs on and off
+            /*// turns the GPIOs on and off
             if (header.indexOf("GET /5/on") >= 0) {
               Serial.println("GPIO 5 on");
               //output5State = "on";
@@ -1375,7 +1387,7 @@ void WebPage()
               Serial.println("GPIO 4 off");
               //output4State = "off";
              // digitalWrite(output4, LOW);
-            }
+            }*/
             
             // Display the HTML web page
             client.println("<!DOCTYPE html><html>");
@@ -1387,14 +1399,16 @@ void WebPage()
             client.println("h2 { font-size: 2.0rem;}");
             client.println("p { font-size: 2.0rem;}");
             client.println(".units { font-size: 1.2rem;}");
-            client.println(".labels{ font-size: 1.5rem; vertical-align:middle; padding-bottom: 15px;}</style></head>");
-           
+            client.println(".labels{ font-size: 1.5rem; vertical-align:middle; padding-bottom: 15px;}</style>");
+            //client.println("<script>function refresh(refreshPeriod){setTimeout(\"location.reload(true);\", refreshPeriod);} window.onload = refresh(30000)</script>");
+            client.println("</head>");
             // Web Page Heading
             client.println("<body><h1>Watering Station</h1>");
             client.println("<h2>Air:</h2>");      
             client.println("<p><i class=\"fas fa-sun\" style=\"color:#f2f20d;\"></i> <span class=\"labels\">Light:</span> <span>"+(String)lux+"</span> <sup class=\"units\">lx</sup></p>");
             client.println("<p><i class=\"fas fa-thermometer-half\" style=\"color:#059e8a;\"></i> <span class=\"labels\">Temperature:</span> <span>"+(String)temp+"</span> <sup class=\"units\">&deg;C</sup></p>");
             client.println("<p><i class=\"fas fa-tint\" style=\"color:#00add6;\"></i> <span class=\"labels\">Humidity:</span> <span>"+(String)humidity+"</span> <sup class=\"units\">&percnt;</sup></p>");
+            client.println("<p><i class=\"fas fa-water\" style=\"color:#00add6;\"></i> <span class=\"labels\">Water Level:</span> <span>"+(String)waterLvl+"</span> <sup class=\"units\">&percnt;</sup></p>");
             client.println("<h2>Flowers:</h2>");
        
             int activeValue[4]={atoi(f1_active), atoi(f2_active), atoi(f3_active), atoi(f4_active)};
@@ -1417,11 +1431,15 @@ void WebPage()
             client.println();
             // Break out of the while loop
             break;
-          } else { // if you got a newline, then clear currentLine
+          }
+          else
+          { // if you got a newline, then clear currentLine
             currentLine = "";
           }
-        } else if (c != '\r') {  // if you got anything else but a carriage return character,
-          currentLine += c;      // add it to the end of the currentLine
+        }
+        else if (c != '\r')
+        {  // if you got anything else but a carriage return character,
+          currentLine += c;// add it to the end of the currentLine
         }
       }
     }
