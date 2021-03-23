@@ -22,7 +22,7 @@ WiFiManager wifiManager;
 WiFiServer server(80);
 
 // Variable to store the HTTP request
-String header;// ="HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n";
+String header;
 
 //Variable for mqtt
 char friendly_name[40];
@@ -68,6 +68,7 @@ const int airValue = 15530;   //Wartosc czujnika w powietrzu
 const int waterValue = 6635;  //Wartosc czujnika w wodzie
 
 int soilMoisturePercent[4]={0,0,0,0}; //procentowe wartosci wilgotnosci gleby
+int tempSoilMoisture[4]={0,0,0,0};
 
 //LED
 int pinLed = 2;
@@ -121,14 +122,15 @@ bool isMqttConfig=false;
 bool isFlowerConfig=false;
 
 //do timerow czasu stabilizacji sensorow po podlewaniu
-unsigned long currentTime = 0;
-unsigned long prevTime = 0;
+unsigned long currentTime[4] = {0,0,0,0};
+unsigned long prevTime[4] = {0,0,0,0};
 const long stabilizationTime = 10000; //czas stabilizacji czujnikow gleby
-bool needStabilization=false;
+bool needStabilization[4]={false, false, false, false};
 
 bool flowerWatering[4]={false,false,false,false};
+bool pumpError[4]={false,false,false,false};
 
-//char message[]="";
+//Oled scrolling
 int xOled1,minX1;
 int xOled2,minX2;
 unsigned long prevOledTime = 0;
@@ -240,7 +242,7 @@ void OledConfigFileError(String fileName)
    display.setCursor(0,2);
    display.println("The file");
    display.setCursor(0,17);
-   display.println(String(fileName));
+   display.println(fileName);
    display.setCursor(0,32);
    display.println("cannot be");
    display.setCursor(0,47);
@@ -393,7 +395,7 @@ void WifiSet(){
   // set dark theme
   wifiManager.setClass("invert"); 
   //wifiManager.setConfigPortalTimeout(180);
-  //wifiManager.setAPClientCheck(true);
+  //wifiManager.setAPClientCheck(true); //if true, reset timeout when webclient connects (true), suggest disabling if captiveportal is open
   
   char customhtml_checkbox_f1[24]="type=\"checkbox\"";
   char customhtml_checkbox_f2[24]="type=\"checkbox\"";
@@ -433,25 +435,21 @@ void WifiSet(){
   WiFiManagerParameter custom_f1_name("f1_name", "Name", f1_name, 35);
   WiFiManagerParameter custom_f1_min("f1_min", "Min", f1_min, 2);
   WiFiManagerParameter custom_f1_max("f1_max", "Max", f1_max, 2);
-  //WiFiManagerParameter custom_f1_active("f1_active", "Is Active (1 - yes)", f1_active, 1);
   WiFiManagerParameter custom_f1_active("f1_active","Is Active","T",2,customhtml_checkbox_f1,WFM_LABEL_BEFORE);
  
   WiFiManagerParameter custom_f2_name("f2_name", "Name", f2_name, 35);
   WiFiManagerParameter custom_f2_min("f2_min", "Min", f2_min, 2);
   WiFiManagerParameter custom_f2_max("f2_max", "Max", f2_max, 2);
-  //WiFiManagerParameter custom_f2_active("f2_active", "Is Active (1 - yes)", f2_active, 1);
   WiFiManagerParameter custom_f2_active("f2_active","Is Active","T",2,customhtml_checkbox_f2,WFM_LABEL_BEFORE);
 
   WiFiManagerParameter custom_f3_name("f3_name", "Name", f3_name, 35);
   WiFiManagerParameter custom_f3_min("f3_min", "Min", f3_min, 2);
   WiFiManagerParameter custom_f3_max("f3_max", "Max", f3_max, 2);
-  //WiFiManagerParameter custom_f3_active("f3_active", "Is Active (1 - yes)", f3_active, 1);
   WiFiManagerParameter custom_f3_active("f3_active","Is Active","T",2,customhtml_checkbox_f3,WFM_LABEL_BEFORE);
 
   WiFiManagerParameter custom_f4_name("f4_name", "Name", f4_name, 35);
   WiFiManagerParameter custom_f4_min("f4_min", "Min", f4_min, 2);
   WiFiManagerParameter custom_f4_max("f4_max", "Max", f4_max, 2);
-  //WiFiManagerParameter custom_f4_active("f4_active", "Is Active (1 - yes)", f4_active, 1);
   WiFiManagerParameter custom_f4_active("f4_active","Is Active","T",2,customhtml_checkbox_f4,WFM_LABEL_BEFORE);
 
   wifiManager.addParameter(&custom_mqtt_label);
@@ -639,8 +637,6 @@ void setup() {
   xOled1=display.width();
   xOled2=display.width();
 
-  //minX=-12*strlen(message);
-
   pcf8574.pinMode(P0, OUTPUT); //delay 1
   pcf8574.pinMode(P1, OUTPUT); //delay 2
   pcf8574.pinMode(P2, OUTPUT); //delay 3
@@ -664,13 +660,13 @@ void setup() {
   pinMode(echoPin, INPUT); //a echo, jako wejście
   digitalWrite(trigPin, HIGH);//initial off
   
-    //welcome oled message
+  //welcome oled message
   display.clearDisplay(); 
   display.setTextSize(2);
   display.setCursor(0,22);
   display.println("Starting..");
   display.display();
-  delay(3000);
+  delay(2000);
   display.clearDisplay();
   display.setCursor(0,22);
   display.println("Reading");
@@ -714,10 +710,7 @@ void setup() {
     client.setBufferSize(255);
     client.setServer(mqtt_server_pubsub.c_str(),atoi(mqtt_port));
   }
-  /*if (isFlowerConfig)
-  {
-    MoistureSensorsRead();
-  }*/
+
   server.begin();
   Serial.println("End setup");
 }
@@ -797,20 +790,23 @@ void BtnCheck()
       else if (pressDuration > shortPressTime && pressDuration < 5000)
       {
         Serial.println("A long press is detected");
+        WiFi.disconnect(true);
+        wifiManager.resetSettings();
+        delay(1000);
         ESP.restart();
       }
       else
       {
         Serial.println("A very long press is detected");
         
-        /*if(SPIFFS.format())
-          {
-            Serial.println("File system Formatted");
-          }
+        if(SPIFFS.format())
+        {
+          Serial.println("File system Formatted");
+        }
         else
-          {
-            Serial.println("File system formatting error");
-          }*/
+        {
+          Serial.println("File system formatting error");
+        }
           
         WiFi.disconnect(true);
         wifiManager.resetSettings();
@@ -947,19 +943,19 @@ void loop()
 
   WebPage();
 
-  if(needStabilization)
+  for (int i = 0; i <= 3; i++)
   {
-    currentTime = millis();
+    if(needStabilization[i])
+    {
+      currentTime[i] = millis();
     
-    if (currentTime - prevTime >= stabilizationTime)
-    {
-      needStabilization=false;
-    }
-    else
-    {
-      OledSensorStabilization();
+      if (currentTime[i] - prevTime[i] >= stabilizationTime)
+      {
+        needStabilization[i]=false;
+      }
     }
   }
+  
 }
 
 //odczyt natezenia swiatala
@@ -1036,7 +1032,7 @@ void WateringFlowers()
 {
   int flowerMoistureAvrg[4]={0,0,0,0};
 
-  if (isFlowerConfig && !needStabilization && !noWater)
+  if (isFlowerConfig && !noWater)
   {
     int isActive[4]={atoi(f1_active), atoi(f2_active), atoi(f3_active), atoi(f4_active)};
     int flowerMin[4]={atoi(f1_min), atoi(f2_min), atoi(f3_min), atoi(f4_min)};
@@ -1045,7 +1041,7 @@ void WateringFlowers()
   
     for (int i = 0; i <= 3; i++)
     {
-      if (isActive[i]==1)
+      if (isActive[i]==1 && !needStabilization[i])
       {
         flowerMoistureAvrg[i]=(flowerMin[i]+flowerMax[i])/2;
         //Serial.println(flowerMoistureAvrg[i]);
@@ -1056,19 +1052,37 @@ void WateringFlowers()
             {
               if(soilMoisturePercent[i]<flowerMoistureAvrg[i])
               {
-                RunPump(i,2000);
+                if(soilMoisturePercent[i]<=tempSoilMoisture[i])
+                {
+                  pumpError[i]=true;
+                }
+                else
+                {
+                  if (pumpError[i])
+                  {
+                    pumpError[i]=false;
+                  }
+                  RunPump(i,2000);
+                  tempSoilMoisture[i]=soilMoisturePercent[i];
+                }
               }
               else
               {
                 flowerWatering[i]=false;
                 Serial.println("Zakończony proces podelewania kwiatka nr: " + String(i+1));
+                tempSoilMoisture[i]=0;
               }
             }        
-            else if (soilMoisturePercent[i]<flowerMin[i] && !needStabilization)
+            else if (soilMoisturePercent[i]<flowerMin[i] && !needStabilization[i])
             {
               flowerWatering[i]=true;
               Serial.println("Rozpoczety proces podelewania kwiatka nr: " + String(i+1));
-              RunPump(i,2000); //nr pompy i czas podlewania
+              if (!pumpError[i])
+              {
+                RunPump(i,2000); //nr pompy i czas podlewania
+                tempSoilMoisture[i]=soilMoisturePercent[i]; //zapis wilgotnosci tymczasowej dla kwiatka
+              }
+              
             }  
         }        
       }
@@ -1089,16 +1103,17 @@ void WateringFlowers()
 void RunPump(int pumpNr, long duratioin)
 {
   WaterLevelRead();
-  if (!noWater && !needStabilization)
+  if (!noWater && !needStabilization[pumpNr])
   {
     pcf8574.digitalWrite(pumpNr, LOW); //wlaczenie pompy
     Serial.println("Pump nr: " + String(pumpNr)+" is running");
     OledWatering(pumpNr);
     delay(duratioin);
     pcf8574.digitalWrite(pumpNr, HIGH); //wylaczenie pompy
+    delay(250);
     Serial.println("Pump nr: " + String(pumpNr)+" has stoped");
-    needStabilization=true;
-    prevTime=millis();
+    needStabilization[pumpNr]=true;
+    prevTime[pumpNr]=millis();
   }
 }
 
@@ -1128,9 +1143,8 @@ void CheckMQTTState()
 
 void OledPrint()
 {
-  if (!needStabilization)
-  {
     String msgConfigError = "not configured";
+    String msgSensorStabilization = "Sensor stabilization";
     String messageFlower1 = "1. Moisture -  " + String(f1_name) + "  " + String(soilMoisturePercent[0]) + " %";
     String messageFlower2 = "2. Moisture -  " + String(f2_name) + "  " + String(soilMoisturePercent[1]) + " %";
     String messageFlower3 = "3. Moisture -  " + String(f3_name) + "  " + String(soilMoisturePercent[2]) + " %";
@@ -1145,6 +1159,18 @@ void OledPrint()
       {
         msgFlower[i]=msgConfigError;
       }
+      else
+      {
+        if (pumpError[i])
+        {
+          msgFlower[i]="Pump " +String(i+1)+ " or sensor "+String(i+1)+" failure!";
+        }
+        else if (needStabilization[i])
+        {
+          msgFlower[i]+=" "+msgSensorStabilization;
+        }
+      }
+      
       
     }
 
@@ -1212,7 +1238,6 @@ void OledPrint()
     if(xOled1<minX1) xOled1 = display.width();
     if(xOled2<minX2) xOled2 = display.width();
 
-  }
 }
 
 void OledWatering(int flower)
@@ -1226,7 +1251,7 @@ void OledWatering(int flower)
   display.display();
 }
 
-void OledSensorStabilization()
+/*void OledSensorStabilization()
 {
   display.clearDisplay();
   display.setTextSize(2);
@@ -1236,7 +1261,7 @@ void OledSensorStabilization()
   display.setTextSize(1);
   display.println("stabilization");
   display.display();
-}
+}*/
 
 //odczyt poziomu wody w zbiorniku
 void WaterLevelRead()
@@ -1285,8 +1310,6 @@ void WaterLevelRead()
 
 void ShowSavedFlowerConfigOled()
 {
-  if (!needStabilization)
-  {
     String messageFlower1 = "1. " + String(f1_name) + "  " + String(f1_min) + " / " + String(f1_max);
     String messageFlower2 = "2. " + String(f2_name) + "  " + String(f2_min) + " / " + String(f2_max);
     String messageFlower3 = "3. " + String(f3_name) + "  " + String(f3_min) + " / " + String(f3_max);
@@ -1313,34 +1336,33 @@ void ShowSavedFlowerConfigOled()
     display.setCursor(0,0);  //oled display
     display.println("Flower Saved Config");
 
-   //display.setCursor(0,9);
-   //display.print("");
+    display.setCursor(0,9);
+    display.print(msgFlower[0]);
 
     display.setCursor(0,18);
-    display.print(msgFlower[0]);
+    display.print(msgFlower[1]);
    
     display.setCursor(0,27);
-    display.print(msgFlower[1]);
-    
-    display.setCursor(0,36);
     display.print(msgFlower[2]);
     
+    display.setCursor(0,36);
+    display.print(msgFlower[3]);
+    
     display.setCursor(0,45);
-    display.print(msgFlower[3]);   
+    display.println("WiFi SSID:");   
     
     display.setCursor(0,54);
-    display.println("WiFi SSID: "+WiFi.SSID());
+    display.println(WiFi.SSID());
     
     display.display();
     delay(5000);
-  }  
+
 }
 
 void WebPage()
 {
   WiFiClient client = server.available();   // Listen for incoming clients
 
-  //if (client)
   if (!client)// If a new client connects,
   {
     return;
@@ -1431,10 +1453,6 @@ void WebPage()
               }
             }
             client.println("</body></html>");
-            //client.println("<p><i class=\"fas fa-seedling"\" style=\"color:#00cc00;\"></i> <span>"+String(f1_name)+"</span> <span class=\"labels\"> - Moisture:</span> <span>"+(String)soilMoisturePercent[0]+"</span> <sup class=\"units\">&percnt;</sup></p>");
-            //client.println("<p><i class=\"fas fa-seedling"\" style=\"color:#00cc00;\"></i> <span>"+String(f2_name)+"</span> <span class=\"labels\"> - Moisture:</span> <span>"+(String)soilMoisturePercent[1]+"</span> <sup class=\"units\">&percnt;</sup></p>");
-            //client.println("<p><i class=\"fas fa-seedling"\" style=\"color:#00cc00;\"></i> <span>"+String(f3_name)+"</span> <span class=\"labels\"> - Moisture:</span> <span>"+(String)soilMoisturePercent[2]+"</span> <sup class=\"units\">&percnt;</sup></p>");
-            //client.println("<p><i class=\"fas fa-seedling"\" style=\"color:#00cc00;\"></i> <span>"+String(f4_name)+"</span> <span class=\"labels\"> - Moisture:</span> <span>"+(String)soilMoisturePercent[3]+"</span> <sup class=\"units\">&percnt;</sup></p>");
             
             // The HTTP response ends with another blank line
             client.println();
