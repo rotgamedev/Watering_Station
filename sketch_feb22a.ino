@@ -790,24 +790,33 @@ void BtnCheck()
       else if (pressDuration > shortPressTime && pressDuration < 5000)
       {
         Serial.println("A long press is detected");
-        WiFi.disconnect(true);
-        wifiManager.resetSettings();
-        delay(1000);
+        display.clearDisplay(); 
+        display.setTextSize(2);
+        display.setCursor(0,22);
+        display.println("Rebooting..");
+        display.display();
+        delay(2000);
         ESP.restart();
       }
       else
       {
         Serial.println("A very long press is detected");
         
-        if(SPIFFS.format())
+        /*if(SPIFFS.format())
         {
           Serial.println("File system Formatted");
         }
         else
         {
           Serial.println("File system formatting error");
-        }
-          
+        }*/
+        display.clearDisplay(); 
+        display.setTextSize(2);
+        display.setCursor(0,22);
+        display.println("Resetting..");
+        display.display();
+        delay(2000);
+        
         WiFi.disconnect(true);
         wifiManager.resetSettings();
         delay(1000);
@@ -1037,7 +1046,6 @@ void WateringFlowers()
     int isActive[4]={atoi(f1_active), atoi(f2_active), atoi(f3_active), atoi(f4_active)};
     int flowerMin[4]={atoi(f1_min), atoi(f2_min), atoi(f3_min), atoi(f4_min)};
     int flowerMax[4]={atoi(f1_max), atoi(f2_max), atoi(f3_max), atoi(f4_max)};
-  
   
     for (int i = 0; i <= 3; i++)
     {
