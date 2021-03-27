@@ -49,6 +49,7 @@ String mqtt_password_pubsub;
 #define SCREEN_HEIGHT 64 // OLED display height, in pixels
 #define OLED_RESET -1 // Reset pin # (or -1 if sharing Arduino reset pin)
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
+bool displayOn=true;
 
 //I2C addresses:
 Adafruit_ADS1115 ads(0x48); //ekspander wejsc analogowych
@@ -109,6 +110,13 @@ int currentState;     // the current reading from the input pin
 unsigned long pressedTime  = 0;
 unsigned long releasedTime = 0;
 const int shortPressTime = 500;
+
+//btn2
+int lastState2 = LOW;
+int currentState2;
+unsigned long pressedTime2  = 0;
+unsigned long releasedTime2 = 0;
+const int shortPressTime2 = 500; 
 
 //variable to determine if a configuration save is needed
 bool shouldSaveConfig = false;
@@ -642,7 +650,7 @@ void setup() {
   pcf8574.pinMode(P2, OUTPUT); //delay 3
   pcf8574.pinMode(P3, OUTPUT); //delay 4
   pcf8574.pinMode(P4, OUTPUT); //no used
-  pcf8574.pinMode(P5, OUTPUT);//no used
+  pcf8574.pinMode(P5, INPUT); //button2
   pcf8574.pinMode(P6, OUTPUT); //RED LED
   pcf8574.pinMode(P7, INPUT); //button
   pcf8574.digitalWrite(P0, HIGH); //initial delay off
@@ -734,8 +742,16 @@ void BtnCheck()
       if( pressDuration < shortPressTime )
       {
         Serial.println("A short press is detected");
-
-        ShowSavedFlowerConfigOled();
+        if (displayOn)
+        {
+          ShowSavedFlowerConfigOled();
+        }
+        else
+        {
+          display.ssd1306_command(SSD1306_DISPLAYON);
+          ShowSavedFlowerConfigOled();
+          display.ssd1306_command(SSD1306_DISPLAYOFF);
+        } 
         
        /* Serial.println(friendly_name);
         Serial.println(mqtt_server);
@@ -790,6 +806,11 @@ void BtnCheck()
       else if (pressDuration > shortPressTime && pressDuration < 5000)
       {
         Serial.println("A long press is detected");
+        if (!displayOn)
+        {
+          display.ssd1306_command(SSD1306_DISPLAYON);
+        }
+        
         display.clearDisplay(); 
         display.setTextSize(2);
         display.setCursor(0,22);
@@ -801,7 +822,10 @@ void BtnCheck()
       else
       {
         Serial.println("A very long press is detected");
-        
+        if (!displayOn)
+        {
+          display.ssd1306_command(SSD1306_DISPLAYON);
+        }
         /*if(SPIFFS.format())
         {
           Serial.println("File system Formatted");
@@ -826,6 +850,50 @@ void BtnCheck()
 
   // save the the last state
   lastState = currentState;
+}
+
+void Btn2Check()
+{
+  currentState2 = pcf8574.digitalRead(P5,true);
+    
+  if(lastState2 == LOW && currentState2 == HIGH)
+  {        
+      // button is pressed
+    pressedTime2 = millis();
+  }
+  else if(lastState2 == HIGH && currentState2 == LOW)
+  {
+    // button is released
+    releasedTime2 = millis();
+
+    long pressDuration2 = releasedTime2 - pressedTime2;
+    if( pressDuration2 < shortPressTime2 )
+    {
+      Serial.println("A short press is detected");
+      if (displayOn)
+      {
+        display.ssd1306_command(SSD1306_DISPLAYOFF);
+        Serial.println("Display OFF");
+        displayOn=false;
+      }
+      else
+      {
+        display.ssd1306_command(SSD1306_DISPLAYON);
+        Serial.println("Display ON");
+        displayOn=true;
+      }
+
+    }
+    else if (pressDuration2 > shortPressTime2 && pressDuration2 < 5000)
+    {
+
+    }
+    else
+    {
+      
+    }
+  }
+  lastState2 = currentState2;
 }
 
 //led low water level on
@@ -909,6 +977,7 @@ void loop()
 {
   unsigned long currentMillis = millis();
   BtnCheck();
+  Btn2Check();
 
   int activeValue[4]={atoi(f1_active), atoi(f2_active), atoi(f3_active), atoi(f4_active)};
   
@@ -1364,6 +1433,7 @@ void ShowSavedFlowerConfigOled()
     
     display.display();
     delay(5000);
+
 
 }
 
