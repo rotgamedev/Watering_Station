@@ -1,3 +1,7 @@
+//by Pawel Merta
+//doc : https://github.com/rotgamedev
+
+// Used libraries 
 #include <FS.h>
 #include <ESP8266WiFi.h>
 #include <DNSServer.h>
@@ -24,13 +28,14 @@ WiFiServer server(80);
 // Variable to store the HTTP request
 String header;
 
-//Variable for mqtt
+//Variables for wifimanager to store mqtt data
 char friendly_name[40];
 char mqtt_server[40];
 char mqtt_port[10];
 char mqtt_username[40];
 char mqtt_password[40];
 
+//Variables used in PubSub
 String mqtt_server_pubsub;
 String friendly_name_pubsub;
 String mqtt_username_pubsub;
@@ -49,60 +54,61 @@ String mqtt_password_pubsub;
 #define SCREEN_HEIGHT 64 // OLED display height, in pixels
 #define OLED_RESET -1 // Reset pin # (or -1 if sharing Arduino reset pin)
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
-bool displayOn=true;
+
+bool displayOn=true; //Variable to determine if the OLED screen is turned on
 
 //I2C addresses:
-Adafruit_ADS1115 ads(0x48); //ekspander wejsc analogowych
-PCF8574 pcf8574(0x20);      //ekspander GPIO
-BH1750 lightMeter (0x23);   //czujnik natezenia swiatla
+Adafruit_ADS1115 ads(0x48); //analog input expander
+PCF8574 pcf8574(0x20);      //GPIO expander
+BH1750 lightMeter (0x23);   //light intensity sensor GY-30
 
-//DHT sekcja
+//DHT
 DHT dht(DHTPIN, DHTTYPE);
-float temp = 0.0; //variable for temp.
-float humidity = 0.0; //variable for humidity
+float temp = 0.0; //variable to store temp.
+float humidity = 0.0; //variable to store humidity
 
-//bh1750 zmienna natezenia swiatla
+//bh1750 variable to store light intensity
 uint16_t lux=0;
 
-//Czujnik wilgotnosci gleby
-const int airValue = 15530;   //Wartosc czujnika w powietrzu
-const int waterValue = 6635;  //Wartosc czujnika w wodzie
+//Moisture sensor
+const int airValue = 15530;   //Sensor value in the Air
+const int waterValue = 6635;  //Sensor value in the Water
 
-int soilMoisturePercent[4]={0,0,0,0}; //procentowe wartosci wilgotnosci gleby
-int tempSoilMoisture[4]={0,0,0,0};
+int soilMoisturePercent[4]={0,0,0,0}; //soil moisture percentages
+int tempSoilMoisture[4]={0,0,0,0}; //temporary soil moisture percentages used to detect pump or sensor failure
 
 //LED
 int pinLed = 2;
 
-//Kwiatki
-char f1_name[40]; //flower 1 name variable
-char f1_min[5];   //flower 1 min moisture variable
-char f1_max[5];   //flower 1 max moisture variable
-char f1_active[2];  //flower 1 variable to define is sensor in use
+//Plants variables for wifimanager
+char f1_name[40]; //plant 1 name
+char f1_min[5];   //plant 1 min moisture
+char f1_max[5];   //plant 1 max moisture
+char f1_active[2];  //plant 1 variable to define is sensor in use
 
-char f2_name[40];
+char f2_name[40]; //as above
 char f2_min[5];
 char f2_max[5];
 char f2_active[2];
 
-char f3_name[40];
+char f3_name[40]; //as above
 char f3_min[5];
 char f3_max[5];
-char f3_active[2];
+char f3_active[2]; 
 
-char f4_name[40];
+char f4_name[40]; //as above
 char f4_min[5];
 char f4_max[5];
 char f4_active[2];
 
-//Hc-sr04
+//Hc-sr04 values for the specific tank used - should be adjusted
 long h_time=0;
 float h_distance=0;
 const float minWaterLevel=3;
 const float maxWaterLevel=17;
 const float canHeight=22;
 bool noWater=false;
-int waterLvl=0;
+int waterLvl=0; //percentage value
 
 //btn
 int lastState = LOW;  // the previous state from the input pin
@@ -112,8 +118,8 @@ unsigned long releasedTime = 0;
 const int shortPressTime = 500;
 
 //btn2
-int lastState2 = LOW;
-int currentState2;
+int lastState2 = LOW; // the previous state from the input pin
+int currentState2; // the current reading from the input pin
 unsigned long pressedTime2  = 0;
 unsigned long releasedTime2 = 0;
 const int shortPressTime2 = 500; 
@@ -121,22 +127,23 @@ const int shortPressTime2 = 500;
 //variable to determine if a configuration save is needed
 bool shouldSaveConfig = false;
 
-//varibale used for timer
+//varibales used for sensor reading
 unsigned long previousMillis = 0;
-const long interval = 10000; //interwal odczytu czujnikow
+const long interval = 10000; //sensor reading interval
 
-//zmienna trzyma informacje czy udalo sie odczytac konfigi
-bool isMqttConfig=false;
-bool isFlowerConfig=false;
+//variables holds information whether it was possible to read the configuration
+bool isMqttConfig=false; //for mqtt
+bool isFlowerConfig=false; //for plants
 
-//do timerow czasu stabilizacji sensorow po podlewaniu
+//varibales used for stabilization of soil moisture sensors
 unsigned long currentTime[4] = {0,0,0,0};
 unsigned long prevTime[4] = {0,0,0,0};
-const long stabilizationTime = 10000; //czas stabilizacji czujnikow gleby
-bool needStabilization[4]={false, false, false, false};
+const long stabilizationTime = 10000; //stabilization of soil moisture sensors time
+bool needStabilization[4]={false, false, false, false}; //determines whether a stabilization time after watering is needed
 
-bool flowerWatering[4]={false,false,false,false};
-bool pumpError[4]={false,false,false,false};
+bool flowerWatering[4]={false,false,false,false}; //variable that stores data about the necessity of the watering process
+bool pumpError[4]={false,false,false,false}; //variable that stores data about pump or sensro failure
+
 
 //Oled scrolling
 int xOled1,minX1;
@@ -153,15 +160,15 @@ unsigned long currentTimeWeb = 0;
 unsigned long previousTimeWeb = 0;
 const long timeoutTime=2000;
 
-//metody---------------------------------------------------------------------------
+//methods---------------------------------------------------------------------------
 
-//metoda wykonywana gdy nastapi zmiana konfiguracji w wifimanagerze
+//performed when there is a configuration change in the wifimanager
 void saveConfigCallback () {
   Serial.println("Should save config");
   shouldSaveConfig = true;
 }
 
-//metoda wykonywana przy bledzie polaczenia z zapisanym wifi
+//performed when there is a connection error
 void configModeCallback (WiFiManager *myWiFiManager) {
     display.clearDisplay();
     display.setTextSize(1);
@@ -177,7 +184,7 @@ void configModeCallback (WiFiManager *myWiFiManager) {
     display.clearDisplay();
 }
 
-//odczyt pliku konfiguracji mqtt
+//reading mqtt configuration file
 void ReadMqttConfig(){
   if (SPIFFS.begin()) {
     Serial.println("Mounted file system");
@@ -260,7 +267,7 @@ void OledConfigFileError(String fileName)
    delay(2000);
 }
 
-//zapis do pliku json danych mqtt (gdy shouldSaveConfig=true )
+//saving mqtt data to the json file (when shouldSaveConfig = true))
 void SaveMqttConfig(){
   if (shouldSaveConfig) {
     Serial.println("Saving mqtt config file");
@@ -286,7 +293,7 @@ void SaveMqttConfig(){
   }
 }
 
-//odczyt pliku konfiguracji kwiatow
+//reading plants configuration file
 void ReadFlowerConfig()
 {
   if (SPIFFS.begin())
@@ -359,10 +366,10 @@ void ReadFlowerConfig()
   }
 }
 
-//zapis do pliku json danych kwiatkow (gdy shouldSaveConfig=true )
+//saving plants data to the json file (when shouldSaveConfig = true))
 void SaveFlowerConfig(){
   if (shouldSaveConfig) {
-    Serial.println("Saving flower config file");
+    Serial.println("Saving plants config file");
     
     DynamicJsonBuffer jsonBuffer;
     JsonObject& json = jsonBuffer.createObject();
@@ -396,7 +403,7 @@ void SaveFlowerConfig(){
   }
 }
 
-//metoda konfiguracji wifimanager
+//wifimanager configuration metda
 void WifiSet(){
 
   WiFi.mode(WIFI_STA); // explicitly set mode, esp defaults to STA+AP
@@ -405,13 +412,13 @@ void WifiSet(){
   //wifiManager.setConfigPortalTimeout(180);
   //wifiManager.setAPClientCheck(true); //if true, reset timeout when webclient connects (true), suggest disabling if captiveportal is open
   
-  char customhtml_checkbox_f1[24]="type=\"checkbox\"";
+  char customhtml_checkbox_f1[24]="type=\"checkbox\""; //checbox in web wifimanager
   char customhtml_checkbox_f2[24]="type=\"checkbox\"";
   char customhtml_checkbox_f3[24]="type=\"checkbox\"";
   char customhtml_checkbox_f4[24]="type=\"checkbox\"";
   
   if (strcmp(f1_active, "1")==0){
-    strcat(customhtml_checkbox_f1, "checked");
+    strcat(customhtml_checkbox_f1, "checked"); //setting the state of the checkbox based on the configuration of plants
   }
   if (strcmp(f2_active, "1")==0){
     strcat(customhtml_checkbox_f2, "checked");
@@ -425,21 +432,21 @@ void WifiSet(){
    
   //labels
   WiFiManagerParameter custom_mqtt_label("<p>MQTT server credentials</p>");
-  WiFiManagerParameter custom_flower_label("<p>Flowers configuration</p>");
-  WiFiManagerParameter custom_flower1_label("<p>Flower 1:</p>");
-  WiFiManagerParameter custom_flower2_label("<p>Flower 2:</p>");
-  WiFiManagerParameter custom_flower3_label("<p>Flower 3:</p>");
-  WiFiManagerParameter custom_flower4_label("<p>Flower 4:</p>");
+  WiFiManagerParameter custom_flower_label("<p>Plants configuration</p>");
+  WiFiManagerParameter custom_flower1_label("<p>Plant 1:</p>");
+  WiFiManagerParameter custom_flower2_label("<p>Plant 2:</p>");
+  WiFiManagerParameter custom_flower3_label("<p>Plant 3:</p>");
+  WiFiManagerParameter custom_flower4_label("<p>Plant 4:</p>");
   WiFiManagerParameter custom_moisture_label("<p>Moisture (5-85%)</p>");
   
-  //parametry mqtt
+  //mqtt parameters
   WiFiManagerParameter custom_friendly_name("friendly_name", "Friendly Name", friendly_name, 40);
   WiFiManagerParameter custom_mqtt_server("mqtt_server", "MQTT Server", mqtt_server, 40);
   WiFiManagerParameter custom_mqtt_port("mqtt_port", "MQTT Port", mqtt_port, 6);
   WiFiManagerParameter custom_mqtt_username("mqtt_username", "MQTT Username", mqtt_username, 40);
   WiFiManagerParameter custom_mqtt_password("mqtt_password", "MQTT Password", mqtt_password, 40);
 
-  //parametry dla konfiguracji kwiatkow
+  //plants parameters
   WiFiManagerParameter custom_f1_name("f1_name", "Name", f1_name, 35);
   WiFiManagerParameter custom_f1_min("f1_min", "Min", f1_min, 2);
   WiFiManagerParameter custom_f1_max("f1_max", "Max", f1_max, 2);
@@ -513,6 +520,7 @@ void WifiSet(){
   {
     Serial.println("Failed to connect or hit timeout");
     // ESP.restart();
+    isMqttConfig=false;
   } 
   else
   {
@@ -529,18 +537,17 @@ void WifiSet(){
     display.clearDisplay();
   }
 
-  //assigning data to variables - mqtt and flowers
+  //assigning data to variables - mqtt and plants
   strcpy(friendly_name, custom_friendly_name.getValue());
   strcpy(mqtt_server, custom_mqtt_server.getValue());
   strcpy(mqtt_port, custom_mqtt_port.getValue());
   strcpy(mqtt_username, custom_mqtt_username.getValue());
   strcpy(mqtt_password, custom_mqtt_password.getValue());
 
-  //flowers
+  //plants
   strcpy(f1_name, custom_f1_name.getValue());
   strcpy(f1_min, custom_f1_min.getValue());
   strcpy(f1_max, custom_f1_max.getValue());
-  //strcpy(f1_active, custom_f1_active.getValue());
 
   if(isDigit(f1_min[0]) && (isDigit(f1_min[1]) || f1_min[1]==NULL) && (isDigit(f1_max[0]) && isDigit(f1_max[1])))
   {
@@ -563,7 +570,6 @@ void WifiSet(){
   strcpy(f2_name, custom_f2_name.getValue());
   strcpy(f2_min, custom_f2_min.getValue());
   strcpy(f2_max, custom_f2_max.getValue());
-  //strcpy(f2_active, custom_f2_active.getValue());
 
   if(isDigit(f2_min[0]) && (isDigit(f2_min[1]) || f2_min[1]==NULL) && (isDigit(f2_max[0]) && isDigit(f2_max[1])))
   {
@@ -586,7 +592,6 @@ void WifiSet(){
   strcpy(f3_name, custom_f3_name.getValue());
   strcpy(f3_min, custom_f3_min.getValue());
   strcpy(f3_max, custom_f3_max.getValue());
-  //strcpy(f3_active, custom_f3_active.getValue());
   
   if(isDigit(f3_min[0]) && (isDigit(f3_min[1]) || f3_min[1]==NULL) && (isDigit(f3_max[0]) && isDigit(f3_max[1])))
   {
@@ -609,7 +614,6 @@ void WifiSet(){
   strcpy(f4_name, custom_f4_name.getValue());
   strcpy(f4_min, custom_f4_min.getValue());
   strcpy(f4_max, custom_f4_max.getValue());
-  //strcpy(f4_active, custom_f4_active.getValue());
 
   if(isDigit(f4_min[0]) && (isDigit(f4_min[1]) || f4_min[1]==NULL) && (isDigit(f4_max[0]) && isDigit(f4_max[1])))
   {
@@ -660,12 +664,12 @@ void setup() {
   pcf8574.digitalWrite(P6, HIGH); //redled initial off
   
   // initialize GPIO 2 as an output.
-  pinMode(pinLed, OUTPUT); //pin do sterowania LEDem
+  pinMode(pinLed, OUTPUT);
   digitalWrite(pinLed, HIGH); //off
  
   // initalize GPIOs fo HC-SR04
-  pinMode(trigPin, OUTPUT); //Pin, do którego podłączymy trig jako wyjście
-  pinMode(echoPin, INPUT); //a echo, jako wejście
+  pinMode(trigPin, OUTPUT);
+  pinMode(echoPin, INPUT);
   digitalWrite(trigPin, HIGH);//initial off
   
   //welcome oled message
@@ -689,9 +693,6 @@ void setup() {
   MoistureSensorsRead();
   WaterLevelRead();
   
-  //clean FS, for testing
-  //SPIFFS.format();
-
   //read mqtt config
   ReadMqttConfig();
   //read flower config
@@ -702,10 +703,10 @@ void setup() {
 
   //save mqtt config if need
   SaveMqttConfig();
-  //save flower config if need
+  //save plants config if need
   SaveFlowerConfig();
   
-  //wylaczenie zmiennej zapisu konfiguracji
+  //disabling the configuration save variable
   shouldSaveConfig = false;
 
   if (isMqttConfig)
@@ -753,28 +754,7 @@ void BtnCheck()
           display.ssd1306_command(SSD1306_DISPLAYOFF);
         } 
         
-       /* Serial.println(friendly_name);
-        Serial.println(mqtt_server);
-        Serial.println(mqtt_port);
-        Serial.println(mqtt_username);
-        Serial.println(mqtt_password);
-        Serial.println(f1_name);
-        Serial.println(f1_min);
-        Serial.println(f1_max);
-        Serial.println(f1_active);
-        Serial.println(f2_name);
-        Serial.println(f2_min);
-        Serial.println(f2_max);
-        Serial.println(f2_active);
-        Serial.println(f3_name);
-        Serial.println(f3_min);
-        Serial.println(f3_max);
-        Serial.println(f3_active);
-        Serial.println(f4_name);
-        Serial.println(f4_min);
-        Serial.println(f4_max);
-        Serial.println(f4_active);
-
+       /* 
         if (strcmp(mqtt_port, "1883")==0)
         {
           Serial.println("OK");
@@ -784,12 +764,8 @@ void BtnCheck()
 
         int val = atoi(mqtt_port);
         
-        Serial.println(val);
-
         String name123=friendly_name;
-        Serial.println(name123);
-        
-        
+       
         Serial.print("second char is: ");
         Serial.println(f2_min[1]);
 
@@ -858,7 +834,7 @@ void Btn2Check()
     
   if(lastState2 == LOW && currentState2 == HIGH)
   {        
-      // button is pressed
+    // button is pressed
     pressedTime2 = millis();
   }
   else if(lastState2 == HIGH && currentState2 == LOW)
@@ -886,23 +862,23 @@ void Btn2Check()
     }
     else if (pressDuration2 > shortPressTime2 && pressDuration2 < 5000)
     {
-
+      //not used
     }
     else
     {
-      
+      //not used
     }
   }
   lastState2 = currentState2;
 }
 
-//led low water level on
+//low water level led on
 void WarningLedON()
 {
   pcf8574.digitalWrite(P6, LOW);
 }
 
-//led low water level off
+//low water level led off
 void WarningLedOFF()
 {
   pcf8574.digitalWrite(P6, HIGH);
@@ -915,7 +891,7 @@ void publishAirData(float p_temperature, float p_humidity, uint16_t p_light) {
   // doc : https://github.com/bblanchon/ArduinoJson/wiki/API%20Reference
   StaticJsonBuffer<200> jsonBuffer;
   JsonObject& root = jsonBuffer.createObject();
-  // INFO: the data must be converted into a string; a problem occurs when using floats...
+  // INFO: the data must be converted into a string;
   root["temperature"] = (String)p_temperature;
   root["humidity"] = (String)p_humidity;
   root["light"] = (String)p_light;
@@ -927,6 +903,7 @@ void publishAirData(float p_temperature, float p_humidity, uint16_t p_light) {
         "temperature": "23.20" ,
         "humidity": "43.70",
         "light": "12"
+        "water": "80"
      }
   */
   char data[200];
@@ -944,8 +921,6 @@ void publishFlowerData(int flower_id) {
   String flowerName[4]={String(f1_name),String(f2_name),String(f3_name),String(f4_name)};
   String flowerMoistures[4]={String(soilMoisturePercent[0]),String(soilMoisturePercent[1]),String(soilMoisturePercent[2]),String(soilMoisturePercent[3])};
 
-  //String messageFlower1 = "1. Moisture -  " + String(f1_name) + "  " + String(soilMoisturePercent[0]) + " %";
-
   int activeValue[4]={atoi(f1_active), atoi(f2_active), atoi(f3_active), atoi(f4_active)};
   for (int i = 0; i <= 3; i++)
    {
@@ -956,12 +931,11 @@ void publishFlowerData(int flower_id) {
      }
    }
 
-  
   // create a JSON object
   // doc : https://github.com/bblanchon/ArduinoJson/wiki/API%20Reference
   StaticJsonBuffer<200> jsonBuffer;
   JsonObject& root = jsonBuffer.createObject();
-  // INFO: the data must be converted into a string; a problem occurs when using floats...
+  // INFO: the data must be converted into a string;
   root["flower"+String(flower_id)+"_name"] = String(flowerName[flower_id-1]);
   root["flower"+String(flower_id)+"_moisture"] = String(flowerMoistures[flower_id-1]);
   
@@ -981,22 +955,23 @@ void loop()
 
   int activeValue[4]={atoi(f1_active), atoi(f2_active), atoi(f3_active), atoi(f4_active)};
   
-  if (currentMillis - prevOledTime >= oledRefreshTime)  //wykonuje się co interwal
+  if (currentMillis - prevOledTime >= oledRefreshTime)  //oled refresh interval
   {
     prevOledTime = currentMillis;
     OledPrint();
   } 
  
-  if (currentMillis - previousMillis >= interval)  //wykonuje się co interwal - 10s
+  if (currentMillis - previousMillis >= interval)  //sensors read interval
   {
     previousMillis = currentMillis;
-    TempHumRead(); //oczyte temp wilgotnosci
-    LightRead();//oczyte natezenia swiatla
-    MoistureSensorsRead(); //odczyt wilgotnosci gleby
-    WaterLevelRead();
-    WateringFlowers();
-    CheckWifiState();
-    if (isMqttConfig)
+    TempHumRead(); //read air temperature and humidity
+    LightRead();//read light intensity
+    MoistureSensorsRead(); //soil moisture reading
+    WaterLevelRead(); //check water lvl in tank
+    WateringFlowers(); //start watering process if needed
+    CheckWifiState(); //check wifi state
+    
+    if (isMqttConfig) //when the configuration is created it sends messages to the mqtt server
     {
       if (client.connect(friendly_name_pubsub.c_str(),mqtt_username_pubsub.c_str(),mqtt_password_pubsub.c_str()))
       {
@@ -1021,7 +996,7 @@ void loop()
 
   WebPage();
 
-  for (int i = 0; i <= 3; i++)
+  for (int i = 0; i <= 3; i++) //countdown of the stabilization time of sensors
   {
     if(needStabilization[i])
     {
@@ -1036,14 +1011,14 @@ void loop()
   
 }
 
-//odczyt natezenia swiatala
+//read light intensity
 void LightRead()
 {
     lux = lightMeter.readLightLevel();
     Serial.println("Light: " + String(lux) + " lx"); 
 }
 
-//odczyt temp i wilgotnosci powietrza
+//read air temperture and humidity
 void TempHumRead()
 {
     float newT = dht.readTemperature();
@@ -1074,7 +1049,7 @@ void TempHumRead()
 }
 
 
-//odczyt sensorow w kiatkach
+//read moisture sensors
 void MoistureSensorsRead()
 {
   int16_t adc[4];
@@ -1105,7 +1080,7 @@ void MoistureSensorsRead()
   
 }
 
-//podlewanie
+//watering
 void WateringFlowers()
 {
   int flowerMoistureAvrg[4]={0,0,0,0};
@@ -1121,7 +1096,6 @@ void WateringFlowers()
       if (isActive[i]==1 && !needStabilization[i])
       {
         flowerMoistureAvrg[i]=(flowerMin[i]+flowerMax[i])/2;
-        //Serial.println(flowerMoistureAvrg[i]);
 
         if(flowerMoistureAvrg[i]!=0)
         {
@@ -1146,20 +1120,19 @@ void WateringFlowers()
               else
               {
                 flowerWatering[i]=false;
-                Serial.println("Zakończony proces podelewania kwiatka nr: " + String(i+1));
+                Serial.println("Watering process completed for flower no: " + String(i+1));
                 tempSoilMoisture[i]=0;
               }
             }        
             else if (soilMoisturePercent[i]<flowerMin[i] && !needStabilization[i])
             {
               flowerWatering[i]=true;
-              Serial.println("Rozpoczety proces podelewania kwiatka nr: " + String(i+1));
+              Serial.println("Watering process started for flower no: " + String(i+1));
               if (!pumpError[i])
               {
                 RunPump(i,2000); //nr pompy i czas podlewania
-                tempSoilMoisture[i]=soilMoisturePercent[i]; //zapis wilgotnosci tymczasowej dla kwiatka
+                tempSoilMoisture[i]=soilMoisturePercent[i]; //save temporary moisture
               }
-              
             }  
         }        
       }
@@ -1171,24 +1144,24 @@ void WateringFlowers()
     {
       flowerWatering[i]=false;
     }
-    Serial.println("Zakończony proces podelewania kwiatow z powodu braku wody");
+    Serial.println("Watering plants completed due to lack of water.");
   }
 }
 
 
-//uruchomienie wybranej pompki wody
+//starting the selected water pump
 void RunPump(int pumpNr, long duratioin)
 {
   WaterLevelRead();
   if (!noWater && !needStabilization[pumpNr])
   {
-    pcf8574.digitalWrite(pumpNr, LOW); //wlaczenie pompy
-    Serial.println("Pump nr: " + String(pumpNr)+" is running");
+    pcf8574.digitalWrite(pumpNr, LOW); //run pump
+    Serial.println("Pump no: " + String(pumpNr)+" is running");
     OledWatering(pumpNr);
     delay(duratioin);
-    pcf8574.digitalWrite(pumpNr, HIGH); //wylaczenie pompy
+    pcf8574.digitalWrite(pumpNr, HIGH); //stop pump
     delay(250);
-    Serial.println("Pump nr: " + String(pumpNr)+" has stoped");
+    Serial.println("Pump no: " + String(pumpNr)+" has stoped");
     needStabilization[pumpNr]=true;
     prevTime[pumpNr]=millis();
   }
@@ -1220,7 +1193,7 @@ void CheckMQTTState()
 
 void OledPrint()
 {
-    String msgConfigError = "not configured";
+    String msgConfigError = "-"; //"not configured";
     String msgSensorStabilization = "Sensor stabilization";
     String messageFlower1 = "1. Moisture -  " + String(f1_name) + "  " + String(soilMoisturePercent[0]) + " %";
     String messageFlower2 = "2. Moisture -  " + String(f2_name) + "  " + String(soilMoisturePercent[1]) + " %";
@@ -1246,9 +1219,7 @@ void OledPrint()
         {
           msgFlower[i]+=" "+msgSensorStabilization;
         }
-      }
-      
-      
+      } 
     }
 
     char messageF1[msgFlower[0].length()+1];
@@ -1271,8 +1242,8 @@ void OledPrint()
     int msgMax1 = max(m1,m2);
     int msMax2 = max(m3,m4);
     int finalMax = max(msgMax1,msMax2);
-
-    String messageAirEnv = "AIR: Temperature: " + String(temp) + " C  -  " + "Humidity: " + String(humidity) + " %  -  " + "Light: " + String(lux) + " lx";
+    String tempUnit = "C"; //change do F if use Fahrenheit
+    String messageAirEnv = "AIR: Temperature: " + String(temp) + " " + tempUnit + "  -  " + "Humidity: " + String(humidity) + " %  -  " + "Light: " + String(lux) + " lx";
     char message[messageAirEnv.length()+1];
     strcpy(message, messageAirEnv.c_str());
     
@@ -1291,19 +1262,15 @@ void OledPrint()
 
     display.setCursor(xOled2,18);
     display.print(messageF1);
-    //display.println("Flower 1:  " + String(soilMoisturePercent[0])+ " %");
    
     display.setCursor(xOled2,27);
     display.print(messageF2);
-    //display.println("Flower 2:  " + String(soilMoisturePercent[1])+ " %");
     
     display.setCursor(xOled2,36);
     display.print(messageF3);
-    //display.println("Flower 3:  " + String(soilMoisturePercent[2])+ " %");
     
     display.setCursor(xOled2,45);
     display.print(messageF4);   
-    //display.println("Flower 4:  " + String(soilMoisturePercent[3])+ " %");
     
     display.setCursor(0,54);
     display.println("WATER LEVEL: "+String(waterLvl)+" %");
@@ -1324,23 +1291,11 @@ void OledWatering(int flower)
   display.setCursor(0,10);
   display.println("Watering");
   display.setCursor(0,40);
-  display.println("flower " +String(flower+1));
+  display.println("plant " +String(flower+1));
   display.display();
 }
 
-/*void OledSensorStabilization()
-{
-  display.clearDisplay();
-  display.setTextSize(2);
-  display.setCursor(0,10);
-  display.println("Sensors");
-  display.setCursor(0,40);
-  display.setTextSize(1);
-  display.println("stabilization");
-  display.display();
-}*/
-
-//odczyt poziomu wody w zbiorniku
+//read water lvl in tank
 void WaterLevelRead()
 {
   digitalWrite(trigPin, HIGH);
@@ -1411,7 +1366,7 @@ void ShowSavedFlowerConfigOled()
     display.setTextSize(1);
     
     display.setCursor(0,0);  //oled display
-    display.println("Flower Saved Config");
+    display.println("Saved Plants Config");
 
     display.setCursor(0,9);
     display.print(msgFlower[0]);
@@ -1518,7 +1473,7 @@ void WebPage()
             client.println("<p><i class=\"fas fa-tint\" style=\"color:#00add6;\"></i> <span class=\"labels\">Humidity:</span> <span>"+(String)humidity+"</span> <sup class=\"units\">&percnt;</sup></p>");
             client.println("</div></div>");
             
-            client.println("<h2>Flowers:</h2>");
+            client.println("<h2>Plants:</h2>");
        
             int activeValue[4]={atoi(f1_active), atoi(f2_active), atoi(f3_active), atoi(f4_active)};
             String flowerNames[4]={String(f1_name),String(f2_name),String(f3_name),String(f4_name)};
