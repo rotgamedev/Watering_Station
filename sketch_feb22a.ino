@@ -101,6 +101,9 @@ char f4_min[5];
 char f4_max[5];
 char f4_active[2];
 
+//Sensor stabilization interval for wifimanager
+char sensor_stab[5];
+
 //Hc-sr04 values for the specific tank used - should be adjusted
 long h_time=0;
 float h_distance=0;
@@ -138,7 +141,7 @@ bool isFlowerConfig=false; //for plants
 //varibales used for stabilization of soil moisture sensors
 unsigned long currentTime[4] = {0,0,0,0};
 unsigned long prevTime[4] = {0,0,0,0};
-const long stabilizationTime = 10000; //stabilization of soil moisture sensors time
+unsigned long stabilizationTime = 300000; //stabilization of soil moisture sensors time
 bool needStabilization[4]={false, false, false, false}; //determines whether a stabilization time after watering is needed
 
 bool flowerWatering[4]={false,false,false,false}; //variable that stores data about the necessity of the watering process
@@ -339,6 +342,8 @@ void ReadFlowerConfig()
           strcpy(f4_max, json["f4_max"]);
           strcpy(f4_active, json["f4_active"]);
 
+          strcpy(sensor_stab, json["sensor_stab"]);
+
           isFlowerConfig=true;
 
         } else {
@@ -389,6 +394,7 @@ void SaveFlowerConfig(){
     json["f4_min"] = f4_min;
     json["f4_max"] = f4_max;
     json["f4_active"] = f4_active;
+    json["sensor_stab"] = sensor_stab;
 
     File configFile = SPIFFS.open("/flower.json", "w");
     if (!configFile)
@@ -438,6 +444,7 @@ void WifiSet(){
   WiFiManagerParameter custom_flower3_label("<p>Plant 3:</p>");
   WiFiManagerParameter custom_flower4_label("<p>Plant 4:</p>");
   WiFiManagerParameter custom_moisture_label("<p>Moisture (5-85%)</p>");
+  WiFiManagerParameter custom_stab_label("<p>Sensor stabilization time [min] (1-60)</p>");
   
   //mqtt parameters
   WiFiManagerParameter custom_friendly_name("friendly_name", "Friendly Name", friendly_name, 40);
@@ -466,6 +473,8 @@ void WifiSet(){
   WiFiManagerParameter custom_f4_min("f4_min", "Min", f4_min, 2);
   WiFiManagerParameter custom_f4_max("f4_max", "Max", f4_max, 2);
   WiFiManagerParameter custom_f4_active("f4_active","Is Active","T",2,customhtml_checkbox_f4,WFM_LABEL_BEFORE);
+
+  WiFiManagerParameter custom_sensor_stab("sensor_stab", "Stabilization time", sensor_stab, 2);
 
   wifiManager.addParameter(&custom_mqtt_label);
   wifiManager.addParameter(&custom_friendly_name);
@@ -503,7 +512,9 @@ void WifiSet(){
   wifiManager.addParameter(&custom_f4_min);
   wifiManager.addParameter(&custom_f4_max);
   wifiManager.addParameter(&custom_f4_active);
-    
+
+  wifiManager.addParameter(&custom_stab_label);
+  wifiManager.addParameter(&custom_sensor_stab);
     
   //set config save notify callback
   wifiManager.setSaveConfigCallback(saveConfigCallback);
@@ -632,6 +643,24 @@ void WifiSet(){
     strcpy(f4_min,"10");
     strcpy(f4_max,"60");
   }
+
+  strcpy(sensor_stab, custom_sensor_stab.getValue());
+  
+  if(isDigit(sensor_stab[0]) && (isDigit(sensor_stab[1]) || sensor_stab[1]==NULL) && (isDigit(sensor_stab[0]) && isDigit(sensor_stab[1])))
+  {
+    if (atoi(sensor_stab)<1)
+    {
+      strcpy(sensor_stab,"5");
+    }
+    else if (atoi(sensor_stab)>60)
+    {
+      strcpy(sensor_stab,"60");
+    }
+  }
+  else
+  {
+    strcpy(sensor_stab,"5");
+  }
   
 }
 
@@ -686,7 +715,7 @@ void setup() {
   display.println("sensors...");
   display.display();
   delay(3000);
-
+ 
   //first reead sensors
   TempHumRead();
   LightRead();
@@ -720,6 +749,8 @@ void setup() {
     client.setServer(mqtt_server_pubsub.c_str(),atoi(mqtt_port));
   }
 
+  stabilizationTime=atoi(sensor_stab)*60000;
+  Serial.println("Sensor stabilization time: "+String(stabilizationTime) + " ms");
   server.begin();
   Serial.println("End setup");
 }
@@ -866,7 +897,26 @@ void Btn2Check()
     }
     else
     {
-      //not used
+      display.clearDisplay(); 
+      display.setTextSize(2);
+      display.setCursor(0,22);
+      display.println("Formatting");
+      display.setCursor(0,36);
+      display.print("memory...");
+      display.display();
+      delay(2000);
+      if(SPIFFS.format())
+      {
+        Serial.println("File system Formatted");
+      }
+      else
+      {
+        Serial.println("File system formatting error");
+      }
+      WiFi.disconnect(true);
+      wifiManager.resetSettings();
+      delay(1000);
+      ESP.restart();
     }
   }
   lastState2 = currentState2;
