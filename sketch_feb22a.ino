@@ -647,8 +647,8 @@ void WifiSet(){
   }
 
   strcpy(sensor_stab, custom_sensor_stab.getValue());
-  
-  if(isDigit(sensor_stab[0]) && (isDigit(sensor_stab[1]) || sensor_stab[1]==NULL) && (isDigit(sensor_stab[0]) && isDigit(sensor_stab[1])))
+    
+  if(isDigit(sensor_stab[0]) && (isDigit(sensor_stab[1]) || sensor_stab[1]==NULL))
   {
     if (atoi(sensor_stab)<1)
     {
@@ -662,6 +662,7 @@ void WifiSet(){
   else
   {
     strcpy(sensor_stab,"5");
+    Serial.println("Setting default sensor stabilization time");
   }
   
 }
