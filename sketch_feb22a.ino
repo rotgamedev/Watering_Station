@@ -222,10 +222,12 @@ void ReadMqttConfig(){
           if (serverIP=="" || serverIP==NULL || deviceName=="" || deviceName==NULL)
           {
             isMqttConfig=false;
+            Serial.println("No mqtt config");
           }
           else
           {
             isMqttConfig=true;
+            Serial.println("Found mqtt config");
           }
           
         }
@@ -415,8 +417,8 @@ void WifiSet(){
   WiFi.mode(WIFI_STA); // explicitly set mode, esp defaults to STA+AP
   // set dark theme
   wifiManager.setClass("invert"); 
-  //wifiManager.setConfigPortalTimeout(180);
-  //wifiManager.setAPClientCheck(true); //if true, reset timeout when webclient connects (true), suggest disabling if captiveportal is open
+  wifiManager.setConfigPortalTimeout(180);
+  wifiManager.setAPClientCheck(true); //if true, reset timeout when webclient connects (true), suggest disabling if captiveportal is open
   
   char customhtml_checkbox_f1[24]="type=\"checkbox\""; //checbox in web wifimanager
   char customhtml_checkbox_f2[24]="type=\"checkbox\"";
@@ -721,7 +723,7 @@ void setup() {
   LightRead();
   MoistureSensorsRead();
   WaterLevelRead();
-  
+
   //read mqtt config
   ReadMqttConfig();
   //read flower config
@@ -738,6 +740,8 @@ void setup() {
   //disabling the configuration save variable
   shouldSaveConfig = false;
 
+  ReadMqttConfig();
+
   if (isMqttConfig)
   {
     mqtt_server_pubsub=mqtt_server;
@@ -747,6 +751,7 @@ void setup() {
   
     client.setBufferSize(255);
     client.setServer(mqtt_server_pubsub.c_str(),atoi(mqtt_port));
+    Serial.println("mqtt config");
   }
 
   stabilizationTime=atoi(sensor_stab)*60000;
@@ -1392,10 +1397,10 @@ void WaterLevelRead()
 
 void ShowSavedFlowerConfigOled()
 {
-    String messageFlower1 = "1. " + String(f1_name) + "  " + String(f1_min) + " / " + String(f1_max);
-    String messageFlower2 = "2. " + String(f2_name) + "  " + String(f2_min) + " / " + String(f2_max);
-    String messageFlower3 = "3. " + String(f3_name) + "  " + String(f3_min) + " / " + String(f3_max);
-    String messageFlower4 = "4. " + String(f4_name) + "  " + String(f4_min) + " / " + String(f4_max);
+    String messageFlower1 = "1. " + String(f1_min) + "  min/max " + String(f1_max);
+    String messageFlower2 = "2. " + String(f2_min) + " min/max " + String(f2_max);
+    String messageFlower3 = "3. " + String(f3_min) + " min/max " + String(f3_max);
+    String messageFlower4 = "4. " + String(f4_min) + " min/max " + String(f4_max);
 
     String msgConfigError = "not configured";
     
@@ -1416,7 +1421,7 @@ void ShowSavedFlowerConfigOled()
     display.setTextSize(1);
     
     display.setCursor(0,0);  //oled display
-    display.println("Saved Plants Config");
+    display.println(WiFi.localIP());
 
     display.setCursor(0,9);
     display.print(msgFlower[0]);
