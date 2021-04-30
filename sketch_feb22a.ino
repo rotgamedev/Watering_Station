@@ -71,8 +71,8 @@ float humidity = 0.0; //variable to store humidity
 uint16_t lux=0;
 
 //Moisture sensor
-const int airValue = 15530;   //Sensor value in the Air
-const int waterValue = 6635;  //Sensor value in the Water
+const int airValue = 7350;  //6730; //10625; //15530;   //Sensor value in the Air
+const int waterValue = 1430; //2400;  //6635;  //Sensor value in the Water
 
 int soilMoisturePercent[4]={0,0,0,0}; //soil moisture percentages
 int tempSoilMoisture[4]={0,0,0,0}; //temporary soil moisture percentages used to detect pump or sensor failure
@@ -107,11 +107,14 @@ char sensor_stab[5];
 //Hc-sr04 values for the specific tank used - should be adjusted
 long h_time=0;
 float h_distance=0;
+float lastDistance=0;
+float currentDistance=0;
 const float minWaterLevel=3;
 const float maxWaterLevel=17;
 const float canHeight=22;
 bool noWater=false;
 int waterLvl=0; //percentage value
+bool firstRun=true;
 
 //btn
 int lastState = LOW;  // the previous state from the input pin
@@ -132,7 +135,7 @@ bool shouldSaveConfig = false;
 
 //varibales used for sensor reading
 unsigned long previousMillis = 0;
-const long interval = 10000; //sensor reading interval
+const long interval = 1800000; //30min sensor reading interval
 
 //variables holds information whether it was possible to read the configuration
 bool isMqttConfig=false; //for mqtt
@@ -162,6 +165,9 @@ String mqttStateMsg="";
 unsigned long currentTimeWeb = 0;
 unsigned long previousTimeWeb = 0;
 const long timeoutTime=2000;
+
+//wifi state
+int wifiStateCount=0;
 
 //methods---------------------------------------------------------------------------
 
@@ -757,6 +763,32 @@ void setup() {
 
   stabilizationTime=atoi(sensor_stab)*60000;
   Serial.println("Sensor stabilization time: "+String(stabilizationTime) + " ms");
+  CheckWifiState();
+  if (WiFi.status() == WL_CONNECTED)
+  {
+    if (isMqttConfig) //when the configuration is created it sends messages to the mqtt server
+    {
+      if (client.connect(friendly_name_pubsub.c_str(),mqtt_username_pubsub.c_str(),mqtt_password_pubsub.c_str()))
+      {
+        int activeValue[4]={atoi(f1_active), atoi(f2_active), atoi(f3_active), atoi(f4_active)};
+        mqttState=true;
+        publishAirData(temp,humidity,lux);
+        for (int i = 0; i <= 3; i++)
+        {
+          if(activeValue[i]==1)
+          {
+            publishFlowerData(i+1);
+          }
+        }
+        Serial.println("Message send");
+      }
+      else
+      {
+        mqttState=false;
+      }
+    }
+  }
+  CheckMQTTState();
   server.begin();
   Serial.println("End setup");
 }
@@ -1002,7 +1034,7 @@ void publishFlowerData(int flower_id) {
   yield();
 }
 
-// the loop function runs over and over again forever
+// the loop function runs over and over again forever-----------------------------------------------------------------------
 void loop()
 {
   unsigned long currentMillis = millis();
@@ -1026,25 +1058,27 @@ void loop()
     WaterLevelRead(); //check water lvl in tank
     WateringFlowers(); //start watering process if needed
     CheckWifiState(); //check wifi state
-    
-    if (isMqttConfig) //when the configuration is created it sends messages to the mqtt server
+    if (WiFi.status() == WL_CONNECTED)
     {
-      if (client.connect(friendly_name_pubsub.c_str(),mqtt_username_pubsub.c_str(),mqtt_password_pubsub.c_str()))
+      if (isMqttConfig) //when the configuration is created it sends messages to the mqtt server
       {
-        mqttState=true;
-        publishAirData(temp,humidity,lux);
-        for (int i = 0; i <= 3; i++)
+        if (client.connect(friendly_name_pubsub.c_str(),mqtt_username_pubsub.c_str(),mqtt_password_pubsub.c_str()))
         {
-          if(activeValue[i]==1)
+          mqttState=true;
+          publishAirData(temp,humidity,lux);
+          for (int i = 0; i <= 3; i++)
           {
-            publishFlowerData(i+1);
+            if(activeValue[i]==1)
+            {
+              publishFlowerData(i+1);
+            }
           }
+          Serial.println("Message send");
         }
-        Serial.println("Message send");
-      }
-      else
-      {
-        mqttState=false;
+        else
+        {
+          mqttState=false;
+        }
       }
     }
     CheckMQTTState();
@@ -1108,12 +1142,50 @@ void TempHumRead()
 //read moisture sensors
 void MoistureSensorsRead()
 {
-  int16_t adc[4];
+ // int16_t adc[4];
+  int16_t adc;
+  int32_t aM;
+  int mn = 10;
   
   for (int i = 0; i <= 3; i++)
   {
-    adc[i]= ads.readADC_SingleEnded(i);
-    soilMoisturePercent[i] = map(adc[i], airValue, waterValue, 0, 100);
+    int16_t minValue=0;
+    int16_t maxValue=0;
+    
+    int32_t sum = 0;
+      
+    for (int m = 0; m < mn; m++)
+    {
+       adc= ads.readADC_SingleEnded(i);
+       
+       if(m==0)
+       {
+        minValue=adc;
+        maxValue=adc;
+       }
+       
+       if (adc>maxValue)
+       {
+          maxValue=adc;
+       }else if (adc<minValue)
+       {
+          minValue=adc;
+       }
+       sum+=adc;
+       //Serial.println(String(adc)+" "+String(i));
+
+    }
+    //Serial.println(sum);
+    Serial.println("max value: "+ String(maxValue));
+    Serial.println("min value: "+ String(minValue));
+    Serial.println(sum);
+    aM=(sum-maxValue-minValue)/mn-2;
+    
+    //adc[i]= ads.readADC_SingleEnded(i);
+    //soilMoisturePercent[i] = map(adc[i], airValue, waterValue, 0, 100);
+    //Serial.println(adc[i]);
+    soilMoisturePercent[i] = map(aM, airValue, waterValue, 0, 100);
+    //Serial.println(aM);
   }
   
   for (int i = 0; i <= 3; i++)
@@ -1228,10 +1300,24 @@ void CheckWifiState()
   if (WiFi.status() == WL_CONNECTED)
   {
     wifiState="OK";
+    wifiStateCount=0;
   }
   else
   {
     wifiState="NO!";
+    wifiStateCount++;
+    //WiFi.begin();
+    if (wifiStateCount=10)
+    {
+      display.clearDisplay(); 
+      display.setTextSize(2);
+      display.setCursor(0,22);
+      display.println("Rebooting..");
+      display.display();
+      delay(2000);
+      ESP.restart();
+    }
+    WiFi.reconnect();
   }
 }
 
@@ -1354,6 +1440,52 @@ void OledWatering(int flower)
 //read water lvl in tank
 void WaterLevelRead()
 {
+  WaterLevelCheck();
+  
+  if (!firstRun)
+  {
+    if (AbnormalCheck(lastDistance, currentDistance))
+    {
+      Serial.print("Abnormal water level read");
+    }
+    else
+    {
+      WaterLevelSet();
+    }
+  }
+  else
+  {
+    if (currentDistance < minWaterLevel)
+    {
+      WaterLevelCheck();      
+      WaterLevelSet();
+    }
+    else
+    {
+      WaterLevelSet();
+    }
+  }
+ 
+  firstRun=false;
+}
+
+// Check for significant jumps and outliers in sensor reading
+bool AbnormalCheck(float lastRead, float thisRead) {
+
+  // if the difference between measures is greater then 8cm, outlier found
+  if ((lastRead - thisRead) > 8)
+  {
+    return true;
+  }
+  else
+  {
+    return false;
+  }
+}
+
+void WaterLevelCheck()
+{
+  lastDistance=currentDistance;
   digitalWrite(trigPin, HIGH);
   delayMicroseconds(2);
   digitalWrite(trigPin, LOW);
@@ -1366,8 +1498,12 @@ void WaterLevelRead()
   //Serial.println(h_time);
   Serial.print(canHeight-h_distance);
   Serial.println (" cm");
+  currentDistance=canHeight-h_distance;
+}
 
-  waterLvl = map((canHeight-h_distance), minWaterLevel, maxWaterLevel, 0, 100);
+void WaterLevelSet()
+{
+  waterLvl = map(currentDistance, minWaterLevel, maxWaterLevel, 0, 100);
   if(waterLvl > 100)
   {
     Serial.println("Water Level: 100 %");
@@ -1383,7 +1519,7 @@ void WaterLevelRead()
     Serial.println("Water Level: " + String(waterLvl) + " %");
   }
   
-  if (canHeight-h_distance <= minWaterLevel)
+  if (currentDistance < minWaterLevel)
   {
     noWater=true;
     Serial.println ("No Water!");
@@ -1538,9 +1674,19 @@ void WebPage()
             {
               if(activeValue[i]==1)
               {
-                client.println("<p><i class=\"fas fa-seedling\" style=\"color:#00cc00;\"></i> <span>"+String(flowerNames[i])+"</span> <span class=\"labels\">Moisture:</span> <span>"+(String)soilMoisturePercent[i]+"</span> <sup class=\"units\">&percnt;</sup></p>");
+                client.println("<p><i class=\"fas fa-seedling\" style=\"color:#00cc00;\"></i> <span>"+String(flowerNames[i])+"</span> <span class=\"labels\">Moisture:</span> <span>"+String(soilMoisturePercent[i])+"</span> <sup class=\"units\">&percnt;</sup></p>");
               }
             }
+  
+            client.println("<div class=\"row\"><div class=\"column\">");
+            client.println("<p><i class=\"fas fa-stopwatch\" style=\"color:#476b6b;\"></i> <span class=\"labels\">Sensors read interval:</span> <span>"+(String(interval/60000))+"</span> <sup class=\"units\">min.</sup></p>");
+            client.println("<p><i class=\"fas fa-stopwatch\" style=\"color:#476b6b;\"></i> <span class=\"labels\">Stabilization time:</span> <span>"+(String(stabilizationTime/60000))+"</span> <sup class=\"units\">min.</sup></p>");
+            client.println("</div><div class=\"column\">");
+            client.println("<p><i class=\"fas fa-wifi\" style=\"color:#3366ff;\"></i> <span class=\"labels\">WIFI:</span> <span>"+WiFi.SSID()+"</span></p>");
+            client.println("<p><i class=\"fas fa-tint\" style=\"color:#3366ff;\"></i> <span class=\"labels\">MQTT:</span> <span>"+mqttStateMsg+"</span></p>");
+            
+            client.println("</div></div>");
+            
             client.println("</body></html>");
             
             // The HTTP response ends with another blank line
