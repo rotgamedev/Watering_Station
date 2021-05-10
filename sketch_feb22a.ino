@@ -71,8 +71,8 @@ float humidity = 0.0; //variable to store humidity
 uint16_t lux=0;
 
 //Moisture sensor
-const int airValue = 7350;  //6730; //10625; //15530;   //Sensor value in the Air
-const int waterValue = 1430; //2400;  //6635;  //Sensor value in the Water
+const int airValue = 7000;//7350;  //6730; //10625; //15530;   //Sensor value in dry soil
+const int waterValue = 1400;//1430; //2400;  //6635;  //Sensor value in wet soil
 
 int soilMoisturePercent[4]={0,0,0,0}; //soil moisture percentages
 int tempSoilMoisture[4]={0,0,0,0}; //temporary soil moisture percentages used to detect pump or sensor failure
@@ -110,7 +110,7 @@ float h_distance=0;
 float lastDistance=0;
 float currentDistance=0;
 const float minWaterLevel=3;
-const float maxWaterLevel=17;
+const float maxWaterLevel=18;
 const float canHeight=22;
 bool noWater=false;
 int waterLvl=0; //percentage value
@@ -135,7 +135,7 @@ bool shouldSaveConfig = false;
 
 //varibales used for sensor reading
 unsigned long previousMillis = 0;
-const long interval = 1800000; //30min sensor reading interval
+const long interval = 300000;//1800000; //5min sensor reading interval
 
 //variables holds information whether it was possible to read the configuration
 bool isMqttConfig=false; //for mqtt
@@ -149,6 +149,7 @@ bool needStabilization[4]={false, false, false, false}; //determines whether a s
 
 bool flowerWatering[4]={false,false,false,false}; //variable that stores data about the necessity of the watering process
 bool pumpError[4]={false,false,false,false}; //variable that stores data about pump or sensro failure
+int errorCount[4]={0,0,0,0};
 
 
 //Oled scrolling
@@ -451,8 +452,8 @@ void WifiSet(){
   WiFiManagerParameter custom_flower2_label("<p>Plant 2:</p>");
   WiFiManagerParameter custom_flower3_label("<p>Plant 3:</p>");
   WiFiManagerParameter custom_flower4_label("<p>Plant 4:</p>");
-  WiFiManagerParameter custom_moisture_label("<p>Moisture (5-85%)</p>");
-  WiFiManagerParameter custom_stab_label("<p>Sensor stabilization time [min] (1-60)</p>");
+  WiFiManagerParameter custom_moisture_label("<p>Moisture (5-95%)</p>");
+  WiFiManagerParameter custom_stab_label("<p>Sensor stabilization time [min] (30-300)</p>");
   
   //mqtt parameters
   WiFiManagerParameter custom_friendly_name("friendly_name", "Friendly Name", friendly_name, 40);
@@ -482,7 +483,7 @@ void WifiSet(){
   WiFiManagerParameter custom_f4_max("f4_max", "Max", f4_max, 2);
   WiFiManagerParameter custom_f4_active("f4_active","Is Active","T",2,customhtml_checkbox_f4,WFM_LABEL_BEFORE);
 
-  WiFiManagerParameter custom_sensor_stab("sensor_stab", "Stabilization time", sensor_stab, 2);
+  WiFiManagerParameter custom_sensor_stab("sensor_stab", "Stabilization time", sensor_stab, 3);
 
   wifiManager.addParameter(&custom_mqtt_label);
   wifiManager.addParameter(&custom_friendly_name);
@@ -550,7 +551,7 @@ void WifiSet(){
     display.setCursor(0,10);
     display.println("Connected");
     display.setCursor(0,40);
-    display.println("to Wifi");
+    display.println("to WiFi");
     display.display();
     delay(5000);
     display.clearDisplay();
@@ -570,7 +571,7 @@ void WifiSet(){
 
   if(isDigit(f1_min[0]) && (isDigit(f1_min[1]) || f1_min[1]==NULL) && (isDigit(f1_max[0]) && isDigit(f1_max[1])))
   {
-    if (strncmp(custom_f1_active.getValue(),"T",1)==0 && atoi(f1_min)>4 && atoi(f1_max)<81 && atoi(f1_min)<atoi(f1_max))
+    if (strncmp(custom_f1_active.getValue(),"T",1)==0 && atoi(f1_min)>4 && atoi(f1_max)<96 && atoi(f1_min)<atoi(f1_max))
     {
       strcpy(f1_active,"1");
     }
@@ -582,7 +583,7 @@ void WifiSet(){
   else
   {
     strcpy(f1_active,"0");
-    strcpy(f1_min,"10");
+    strcpy(f1_min,"25");
     strcpy(f1_max,"60");
   }
   
@@ -592,7 +593,7 @@ void WifiSet(){
 
   if(isDigit(f2_min[0]) && (isDigit(f2_min[1]) || f2_min[1]==NULL) && (isDigit(f2_max[0]) && isDigit(f2_max[1])))
   {
-    if (strncmp(custom_f2_active.getValue(),"T",1)==0 && atoi(f2_min)>4 && atoi(f2_max)<81 && atoi(f2_min)<atoi(f2_max) )
+    if (strncmp(custom_f2_active.getValue(),"T",1)==0 && atoi(f2_min)>4 && atoi(f2_max)<96 && atoi(f2_min)<atoi(f2_max) )
     {
       strcpy(f2_active,"1");
     }
@@ -604,7 +605,7 @@ void WifiSet(){
   else
   {
     strcpy(f2_active,"0");
-    strcpy(f2_min,"10");
+    strcpy(f2_min,"25");
     strcpy(f2_max,"60");
   }
   
@@ -614,7 +615,7 @@ void WifiSet(){
   
   if(isDigit(f3_min[0]) && (isDigit(f3_min[1]) || f3_min[1]==NULL) && (isDigit(f3_max[0]) && isDigit(f3_max[1])))
   {
-    if (strncmp(custom_f3_active.getValue(),"T",1)==0 && atoi(f3_min)>4 && atoi(f3_max)<81 && atoi(f3_min)<atoi(f3_max))
+    if (strncmp(custom_f3_active.getValue(),"T",1)==0 && atoi(f3_min)>4 && atoi(f3_max)<96 && atoi(f3_min)<atoi(f3_max))
     {
       strcpy(f3_active,"1");
     }
@@ -626,7 +627,7 @@ void WifiSet(){
   else
   {
     strcpy(f3_active,"0");
-    strcpy(f3_min,"10");
+    strcpy(f3_min,"25");
     strcpy(f3_max,"60");
   }
   
@@ -636,7 +637,7 @@ void WifiSet(){
 
   if(isDigit(f4_min[0]) && (isDigit(f4_min[1]) || f4_min[1]==NULL) && (isDigit(f4_max[0]) && isDigit(f4_max[1])))
   {
-    if (strncmp(custom_f4_active.getValue(),"T",1)==0 && atoi(f4_min)>4 && atoi(f4_max)<81 && atoi(f4_min)<atoi(f4_max))
+    if (strncmp(custom_f4_active.getValue(),"T",1)==0 && atoi(f4_min)>4 && atoi(f4_max)<96 && atoi(f4_min)<atoi(f4_max))
     {
       strcpy(f4_active,"1");
     }
@@ -648,26 +649,26 @@ void WifiSet(){
   else
   {
     strcpy(f4_active,"0");
-    strcpy(f4_min,"10");
+    strcpy(f4_min,"25");
     strcpy(f4_max,"60");
   }
 
   strcpy(sensor_stab, custom_sensor_stab.getValue());
     
-  if(isDigit(sensor_stab[0]) && (isDigit(sensor_stab[1]) || sensor_stab[1]==NULL))
+  if(isDigit(sensor_stab[0]) && isDigit(sensor_stab[1]) && (isDigit(sensor_stab[2]) || sensor_stab[2]==NULL))
   {
-    if (atoi(sensor_stab)<1)
+    if (atoi(sensor_stab)<30)
     {
-      strcpy(sensor_stab,"5");
+      strcpy(sensor_stab,"30");
     }
-    else if (atoi(sensor_stab)>60)
+    else if (atoi(sensor_stab)>300)
     {
-      strcpy(sensor_stab,"60");
+      strcpy(sensor_stab,"300");
     }
   }
   else
   {
-    strcpy(sensor_stab,"5");
+    strcpy(sensor_stab,"30");
     Serial.println("Setting default sensor stabilization time");
   }
   
@@ -1058,6 +1059,7 @@ void loop()
     WaterLevelRead(); //check water lvl in tank
     WateringFlowers(); //start watering process if needed
     CheckWifiState(); //check wifi state
+    
     if (WiFi.status() == WL_CONNECTED)
     {
       if (isMqttConfig) //when the configuration is created it sends messages to the mqtt server
@@ -1172,20 +1174,20 @@ void MoistureSensorsRead()
           minValue=adc;
        }
        sum+=adc;
-       //Serial.println(String(adc)+" "+String(i));
+       Serial.println(String(adc)+" "+String(i));
 
     }
     //Serial.println(sum);
     Serial.println("max value: "+ String(maxValue));
     Serial.println("min value: "+ String(minValue));
-    Serial.println(sum);
-    aM=(sum-maxValue-minValue)/mn-2;
+    Serial.println("suma - "+String(sum));
+    aM=((sum-maxValue)-minValue)/(mn-2);
     
     //adc[i]= ads.readADC_SingleEnded(i);
     //soilMoisturePercent[i] = map(adc[i], airValue, waterValue, 0, 100);
     //Serial.println(adc[i]);
     soilMoisturePercent[i] = map(aM, airValue, waterValue, 0, 100);
-    //Serial.println(aM);
+    Serial.println("average value - "+ String(aM));
   }
   
   for (int i = 0; i <= 3; i++)
@@ -1233,13 +1235,18 @@ void WateringFlowers()
               {
                 if(soilMoisturePercent[i]<=tempSoilMoisture[i])
                 {
-                  pumpError[i]=true;
+                  errorCount[i]++;
+                  if (errorCount[i]==3)
+                  {
+                    pumpError[i]=true;
+                  }                
                 }
                 else
                 {
                   if (pumpError[i])
                   {
                     pumpError[i]=false;
+                    errorCount[i]=0;
                   }
                   RunPump(i,2000);
                   tempSoilMoisture[i]=soilMoisturePercent[i];
@@ -1446,7 +1453,16 @@ void WaterLevelRead()
   {
     if (AbnormalCheck(lastDistance, currentDistance))
     {
-      Serial.print("Abnormal water level read");
+      Serial.print("Abnormal water level read, repeating reading");
+      WaterLevelCheck();
+      if (AbnormalCheck(lastDistance, currentDistance))
+      {
+        Serial.print("Abnormal water level read"); 
+      }
+      else
+      {
+        WaterLevelSet();
+      }
     }
     else
     {
@@ -1472,8 +1488,8 @@ void WaterLevelRead()
 // Check for significant jumps and outliers in sensor reading
 bool AbnormalCheck(float lastRead, float thisRead) {
 
-  // if the difference between measures is greater then 8cm, outlier found
-  if ((lastRead - thisRead) > 8)
+  // if the difference between measures is greater then 6cm, outlier found
+  if ((lastRead - thisRead) > 6)
   {
     return true;
   }
@@ -1493,12 +1509,12 @@ void WaterLevelCheck()
   digitalWrite(trigPin, HIGH);
 
   h_time = pulseIn(echoPin, HIGH);
-  h_distance=h_time/58;
-  delay(50);
+  h_distance=h_time*0.034/2;  //h_time/58;
+  //delay(50);
   //Serial.println(h_time);
-  Serial.print(canHeight-h_distance);
-  Serial.println (" cm");
   currentDistance=canHeight-h_distance;
+  Serial.print(currentDistance);
+  Serial.println (" cm");
 }
 
 void WaterLevelSet()
