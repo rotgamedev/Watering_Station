@@ -150,6 +150,7 @@ bool needStabilization[4]={false, false, false, false}; //determines whether a s
 bool flowerWatering[4]={false,false,false,false}; //variable that stores data about the necessity of the watering process
 bool pumpError[4]={false,false,false,false}; //variable that stores data about pump or sensro failure
 int errorCount[4]={0,0,0,0};
+float wateringTime=2000;
 
 
 //Oled scrolling
@@ -1053,6 +1054,8 @@ void loop()
   if (currentMillis - previousMillis >= interval)  //sensors read interval
   {
     previousMillis = currentMillis;
+    OledReadingSensors();
+
     TempHumRead(); //read air temperature and humidity
     LightRead();//read light intensity
     MoistureSensorsRead(); //soil moisture reading
@@ -1239,7 +1242,12 @@ void WateringFlowers()
                   if (errorCount[i]==3)
                   {
                     pumpError[i]=true;
-                  }                
+                  }
+                  else
+                  {
+                    RunPump(i,wateringTime);
+                    tempSoilMoisture[i]=soilMoisturePercent[i];               
+                  }
                 }
                 else
                 {
@@ -1248,7 +1256,7 @@ void WateringFlowers()
                     pumpError[i]=false;
                     errorCount[i]=0;
                   }
-                  RunPump(i,2000);
+                  RunPump(i,wateringTime);
                   tempSoilMoisture[i]=soilMoisturePercent[i];
                 }
               }
@@ -1265,7 +1273,7 @@ void WateringFlowers()
               Serial.println("Watering process started for flower no: " + String(i+1));
               if (!pumpError[i])
               {
-                RunPump(i,2000); //nr pompy i czas podlewania
+                RunPump(i,wateringTime); //nr pompy i czas podlewania
                 tempSoilMoisture[i]=soilMoisturePercent[i]; //save temporary moisture
               }
             }  
@@ -1444,6 +1452,17 @@ void OledWatering(int flower)
   display.display();
 }
 
+void OledReadingSensors()
+{
+  display.clearDisplay();
+  display.setTextSize(2);
+  display.setCursor(0,22);
+  display.println("Reading");
+  display.setCursor(0,40);
+  display.println("sensors...");
+  display.display();
+}
+
 //read water lvl in tank
 void WaterLevelRead()
 {
@@ -1453,16 +1472,7 @@ void WaterLevelRead()
   {
     if (AbnormalCheck(lastDistance, currentDistance))
     {
-      Serial.print("Abnormal water level read, repeating reading");
-      WaterLevelCheck();
-      if (AbnormalCheck(lastDistance, currentDistance))
-      {
-        Serial.print("Abnormal water level read"); 
-      }
-      else
-      {
-        WaterLevelSet();
-      }
+      Serial.print("Abnormal water level read"); 
     }
     else
     {
@@ -1488,8 +1498,8 @@ void WaterLevelRead()
 // Check for significant jumps and outliers in sensor reading
 bool AbnormalCheck(float lastRead, float thisRead) {
 
-  // if the difference between measures is greater then 6cm, outlier found
-  if ((lastRead - thisRead) > 6)
+  // if the difference between measures is greater then 4cm, outlier found
+  if ((lastRead - thisRead) > 4)
   {
     return true;
   }
@@ -1499,7 +1509,7 @@ bool AbnormalCheck(float lastRead, float thisRead) {
   }
 }
 
-void WaterLevelCheck()
+/*void WaterLevelCheck()
 {
   lastDistance=currentDistance;
   digitalWrite(trigPin, HIGH);
@@ -1515,6 +1525,60 @@ void WaterLevelCheck()
   currentDistance=canHeight-h_distance;
   Serial.print(currentDistance);
   Serial.println (" cm");
+}*/
+
+void WaterLevelCheck()
+{
+  lastDistance=currentDistance;
+  
+  int mn = 8;
+  float minValue=0;
+  float maxValue=0;
+  float sum = 0;
+  float measure=0;
+  float averageValue=0;
+  
+  for (int m = 0; m < mn; m++)
+  {
+    measure = MeasureWaterLevel();
+    if(m==0)
+    {
+      minValue=measure;
+      maxValue=measure;
+    }
+    
+    if (measure>maxValue)
+    {
+       maxValue=measure;
+    }else if (measure<minValue)
+    {
+      minValue=measure;
+    }
+    
+    sum+=measure;
+  }
+
+  averageValue=((sum-maxValue)-minValue)/(mn-2);
+  currentDistance=averageValue;
+  
+}
+
+float MeasureWaterLevel()
+{
+  digitalWrite(trigPin, HIGH);
+  delayMicroseconds(2);
+  digitalWrite(trigPin, LOW);
+  delayMicroseconds(10);
+  digitalWrite(trigPin, HIGH);
+
+  h_time = pulseIn(echoPin, HIGH);
+  h_distance=h_time*0.034/2;  //h_time/58;
+  delay(100);
+  //Serial.println(h_time);
+  currentDistance=canHeight-h_distance;
+  Serial.print(currentDistance);
+  Serial.println (" cm");
+  return currentDistance;
 }
 
 void WaterLevelSet()
@@ -1690,7 +1754,14 @@ void WebPage()
             {
               if(activeValue[i]==1)
               {
-                client.println("<p><i class=\"fas fa-seedling\" style=\"color:#00cc00;\"></i> <span>"+String(flowerNames[i])+"</span> <span class=\"labels\">Moisture:</span> <span>"+String(soilMoisturePercent[i])+"</span> <sup class=\"units\">&percnt;</sup></p>");
+                if (needStabilization[i]==true)
+                {
+                  client.println("<p><i class=\"fas fa-seedling\" style=\"color:#00cc00;\"></i> <span>"+String(flowerNames[i])+"</span> <span class=\"labels\">Moisture:</span> <span>"+String(soilMoisturePercent[i])+"</span> <sup class=\"units\">&percnt;</sup> <span class=\"labels\">(stabilization)</span></p>");
+                }
+                else
+                {
+                  client.println("<p><i class=\"fas fa-seedling\" style=\"color:#00cc00;\"></i> <span>"+String(flowerNames[i])+"</span> <span class=\"labels\">Moisture:</span> <span>"+String(soilMoisturePercent[i])+"</span> <sup class=\"units\">&percnt;</sup></p>");
+                }
               }
             }
   
