@@ -174,10 +174,10 @@ const long timeoutTime=2000;
 int wifiStateCount=0;
 
 // Define NTP Client to get time
-const long utcOffsetInSeconds = 3600;
+const long utcOffsetInSeconds = 7200;
 char daysOfTheWeek[7][12] = {"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"};
 WiFiUDP ntpUDP;
-NTPClient timeClient(ntpUDP, "pool.ntp.org", utcOffsetInSeconds);
+NTPClient timeClient(ntpUDP, "europe.pool.ntp.org", utcOffsetInSeconds);
 
 String lastReadingTime="No reading since last run";
 String lastWatering[4]={"No watering since last run","No watering since last run","No watering since last run","No watering since last run"};
@@ -804,6 +804,7 @@ void setup() {
     timeClient.begin();
   }
   CheckMQTTState();
+  lastReadingTime=GetDateTime();
   server.begin();
   Serial.println("End setup");
 }
@@ -1255,7 +1256,7 @@ void WateringFlowers()
                 if(soilMoisturePercent[i]<=tempSoilMoisture[i])
                 {
                   errorCount[i]++;
-                  if (errorCount[i]==3)
+                  if (errorCount[i]==5)
                   {
                     pumpError[i]=true;
                   }
@@ -1270,8 +1271,8 @@ void WateringFlowers()
                   if (pumpError[i])
                   {
                     pumpError[i]=false;
-                    errorCount[i]=0;
                   }
+                  errorCount[i]=0;
                   RunPump(i,wateringTime);
                   tempSoilMoisture[i]=soilMoisturePercent[i];
                 }
@@ -1335,13 +1336,16 @@ String GetDateTime()
   if (WiFi.status() == WL_CONNECTED)
   {
     timeClient.update();
-    currentDateTime=String(daysOfTheWeek[timeClient.getDay()])+", "+String(timeClient.getHours())+":"+String(timeClient.getMinutes())+":"+String(timeClient.getSeconds());
+    //currentDateTime=String(daysOfTheWeek[timeClient.getDay()])+", "+String(timeClient.getHours())+":"+String(timeClient.getMinutes())+":"+String(timeClient.getSeconds());
+    currentDateTime=String(daysOfTheWeek[timeClient.getDay()])+", "+String(timeClient.getFormattedTime());
+    Serial.println(timeClient.getFormattedTime());
     return currentDateTime;
   }
   else
   {
     return msgConnectionError;
   }
+  
 }
 
 void CheckWifiState()
@@ -1762,6 +1766,7 @@ void WebPage()
             client.println("p { font-size: 2.0rem;}");
             client.println(".units { font-size: 1.2rem;}");
             client.println(".labels{ font-size: 1.5rem; vertical-align:middle; padding-bottom: 15px;}");
+            client.println(".labels2{ font-size: 1rem; vertical-align:middle; padding-bottom: 15px;}");
             client.println(".column{ float:left; width:50%; padding: 10px;}");
             client.println(".row:after{ display: table; clear: both;}");
             client.println("</style>");
@@ -1788,14 +1793,27 @@ void WebPage()
             {
               if(activeValue[i]==1)
               {
-                if (needStabilization[i]==true)
+                if (pumpError[i])
                 {
-                  client.println("<p><i class=\"fas fa-seedling\" style=\"color:#00cc00;\"></i> <span>"+String(flowerNames[i])+"</span> <span class=\"labels\">Moisture:</span> <span>"+String(soilMoisturePercent[i])+"</span> <sup class=\"units\">&percnt;</sup> <span class=\"labels\">(stabilization)</span></p>");
+                  client.println("<p><i class=\"fas fa-seedling\" style=\"color:#00cc00;\"></i> <span>"+String(flowerNames[i])+"</span> <span class=\"labels\">Moisture:</span> <span>"+String(soilMoisturePercent[i])+"</span> <sup class=\"units\">&percnt;</sup> <span class=\"labels\">(pump or sensor error)</span></p>");
                 }
                 else
                 {
-                  client.println("<p><i class=\"fas fa-seedling\" style=\"color:#00cc00;\"></i> <span>"+String(flowerNames[i])+"</span> <span class=\"labels\">Moisture:</span> <span>"+String(soilMoisturePercent[i])+"</span> <sup class=\"units\">&percnt;</sup></p>");
+                  if (needStabilization[i]==true)
+                  {
+                    client.println("<p><i class=\"fas fa-seedling\" style=\"color:#00cc00;\"></i> <span>"+String(flowerNames[i])+"</span> <span class=\"labels\">Moisture:</span> <span>"+String(soilMoisturePercent[i])+"</span> <sup class=\"units\">&percnt;</sup> <span class=\"labels\">(stabilization)</span></p>");
+                  }
+                  else
+                  {
+                    client.println("<p><i class=\"fas fa-seedling\" style=\"color:#00cc00;\"></i> <span>"+String(flowerNames[i])+"</span> <span class=\"labels\">Moisture:</span> <span>"+String(soilMoisturePercent[i])+"</span> <sup class=\"units\">&percnt;</sup></p>");
+                  }
                 }
+                
+                if (flowerWatering[i])
+                {
+                  client.println("<p><i class=\"fas fa-faucet\" style=\"color:#00add6;\"></i> <span class=\"labels2\">Watering is in progress</span></p>");
+                }
+                client.println("<p><i class=\"fas fa-faucet\" style=\"color:#00add6;\"></i> <span class=\"labels2\">Last watering:</span> <span class=\"labels2\">"+lastWatering[i]+"</span></p>");
               }
             }
   
