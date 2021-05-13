@@ -175,7 +175,9 @@ int wifiStateCount=0;
 
 // Define NTP Client to get time
 const long utcOffsetInSeconds = 7200;
-char daysOfTheWeek[7][12] = {"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"};
+
+String weekDays[7]={"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"};
+String months[12]={"January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"};
 WiFiUDP ntpUDP;
 NTPClient timeClient(ntpUDP, "europe.pool.ntp.org", utcOffsetInSeconds);
 
@@ -1336,8 +1338,17 @@ String GetDateTime()
   if (WiFi.status() == WL_CONNECTED)
   {
     timeClient.update();
+    unsigned long epochTime = timeClient.getEpochTime();
+    struct tm *ptm = gmtime ((time_t *)&epochTime);
+
+    int monthDay = ptm->tm_mday;
+    int currentMonth = ptm->tm_mon+1;
+    String currentMonthName = months[currentMonth-1];
+    int currentYear = ptm->tm_year+1900;
+    String currentDate = String(currentYear) + "." + String(currentMonth) + "." + String(monthDay);
+    currentDateTime = currentMonthName + ", "+ currentDate + ", " + String(timeClient.getFormattedTime());
     //currentDateTime=String(daysOfTheWeek[timeClient.getDay()])+", "+String(timeClient.getHours())+":"+String(timeClient.getMinutes())+":"+String(timeClient.getSeconds());
-    currentDateTime=String(daysOfTheWeek[timeClient.getDay()])+", "+String(timeClient.getFormattedTime());
+    //currentDateTime=String(weekDays[timeClient.getDay()])+", "+String(timeClient.getFormattedTime());
     Serial.println(timeClient.getFormattedTime());
     return currentDateTime;
   }
@@ -1760,7 +1771,7 @@ void WebPage()
             client.println("<link rel=\"stylesheet\" href=\"https://use.fontawesome.com/releases/v5.7.2/css/all.css\" integrity=\"sha384-fnmOCqbTlWIlj8LyTjo7mOUStjsKC4pOpQbqyi7RrhN7udi9RwhKkMHpvLbHG9Sr\" crossorigin=\"anonymous\">");                          
             client.println("<style>");
             client.println("*{box-sizing: border-box;}");
-            client.println("html { font-family: Arial; display: inline-block; margin: 0px auto; text-align: center;}");
+            client.println("html { font-family: Arial; display: inline-block; margin: 0px auto; text-align: center; color: white;}");
             client.println("h1 { font-size: 3.0rem;}");    
             client.println("h2 { font-size: 2.0rem;}");
             client.println("p { font-size: 2.0rem;}");
@@ -1773,7 +1784,7 @@ void WebPage()
             //client.println("<script>function refresh(refreshPeriod){setTimeout(\"location.reload(true);\", refreshPeriod);} window.onload = refresh(30000)</script>");
             client.println("</head>");
             // Web Page Heading
-            client.println("<body><h1>Watering Station</h1>");
+            client.println("<body style=\"background-color:#242424;\"><h1>Watering Station</h1>");
             client.println("<h2>Air:</h2>");      
 
             client.println("<div class=\"row\"><div class=\"column\">");
@@ -1811,19 +1822,19 @@ void WebPage()
                 
                 if (flowerWatering[i])
                 {
-                  client.println("<p><i class=\"fas fa-faucet\" style=\"color:#00add6;\"></i> <span class=\"labels2\">Watering is in progress</span></p>");
+                  client.println("<p><span class=\"labels2\">Watering is in progress</span></p>");
                 }
-                client.println("<p><i class=\"fas fa-faucet\" style=\"color:#00add6;\"></i> <span class=\"labels2\">Last watering:</span> <span class=\"labels2\">"+lastWatering[i]+"</span></p>");
+                client.println("<p><span class=\"labels2\">Last watering:</span> <span class=\"labels2\">"+lastWatering[i]+"</span></p>");
               }
             }
   
             client.println("<div class=\"row\"><div class=\"column\">");
             client.println("<p><i class=\"fas fa-stopwatch\" style=\"color:#476b6b;\"></i> <span class=\"labels\">Sensors read interval:</span> <span>"+(String(interval/60000))+"</span> <sup class=\"units\">min.</sup></p>");
             client.println("<p><i class=\"fas fa-stopwatch\" style=\"color:#476b6b;\"></i> <span class=\"labels\">Stabilization time:</span> <span>"+(String(stabilizationTime/60000))+"</span> <sup class=\"units\">min.</sup></p>");
-            client.println("<p><i class=\"fas fa-stopwatch\" style=\"color:#476b6b;\"></i> <span class=\"labels\">Last read:</span> <span>"+lastReadingTime+"</span></p>");
+            client.println("<p><span class=\"labels\">Last read:</span> <span>"+lastReadingTime+"</span></p>");
             client.println("</div><div class=\"column\">");
             client.println("<p><i class=\"fas fa-wifi\" style=\"color:#3366ff;\"></i> <span class=\"labels\">WIFI:</span> <span>"+WiFi.SSID()+"</span></p>");
-            client.println("<p><i class=\"fas fa-tint\" style=\"color:#3366ff;\"></i> <span class=\"labels\">MQTT:</span> <span>"+mqttStateMsg+"</span></p>");
+            client.println("<p><i class=\"fas fa-wifi\" style=\"color:#3366ff;\"></i> <span class=\"labels\">MQTT:</span> <span>"+mqttStateMsg+"</span></p>");
             
             client.println("</div></div>");
             
