@@ -17,8 +17,6 @@
 #include <PCF8574.h> //include <Wire.h>
 #include <Adafruit_ADS1015.h>
 #include <BH1750.h>
-#include <NTPClient.h>
-#include <WiFiUdp.h>
 
 //------------------------------------
 
@@ -172,16 +170,6 @@ const long timeoutTime=2000;
 
 //wifi state
 int wifiStateCount=0;
-
-// Define NTP Client to get time
-const long utcOffsetInSeconds = 3600;
-char daysOfTheWeek[7][12] = {"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"};
-WiFiUDP ntpUDP;
-NTPClient timeClient(ntpUDP, "pool.ntp.org", utcOffsetInSeconds);
-
-String lastReadingTime="No reading since last run";
-String lastWatering[4]={"No watering since last run","No watering since last run","No watering since last run","No watering since last run"};
-
 
 //methods---------------------------------------------------------------------------
 
@@ -801,7 +789,6 @@ void setup() {
         mqttState=false;
       }
     }
-    timeClient.begin();
   }
   CheckMQTTState();
   server.begin();
@@ -1023,7 +1010,6 @@ void publishFlowerData(int flower_id) {
 
   String flowerName[4]={String(f1_name),String(f2_name),String(f3_name),String(f4_name)};
   String flowerMoistures[4]={String(soilMoisturePercent[0]),String(soilMoisturePercent[1]),String(soilMoisturePercent[2]),String(soilMoisturePercent[3])};
-  String flowerLastWatering[4]={lastWatering[0],lastWatering[1],lastWatering[2],lastWatering[3]};
 
   int activeValue[4]={atoi(f1_active), atoi(f2_active), atoi(f3_active), atoi(f4_active)};
   for (int i = 0; i <= 3; i++)
@@ -1042,7 +1028,6 @@ void publishFlowerData(int flower_id) {
   // INFO: the data must be converted into a string;
   root["flower"+String(flower_id)+"_name"] = String(flowerName[flower_id-1]);
   root["flower"+String(flower_id)+"_moisture"] = String(flowerMoistures[flower_id-1]);
-  root["flower"+String(flower_id)+"_lastWatering"] = String(flowerLastWatering[flower_id-1]);
   
   root.prettyPrintTo(Serial);
   char data[200];
@@ -1102,7 +1087,6 @@ void loop()
       }
     }
     CheckMQTTState();
-    lastReadingTime=GetDateTime();
   }
 
   WebPage();
@@ -1322,25 +1306,7 @@ void RunPump(int pumpNr, long duratioin)
     delay(250);
     Serial.println("Pump no: " + String(pumpNr)+" has stoped");
     needStabilization[pumpNr]=true;
-    prevTime[pumpNr]=millis(); 
-    lastWatering[pumpNr]=GetDateTime();
-
-  }
-}
-
-String GetDateTime()
-{
-  String currentDateTime="";
-  String msgConnectionError="No connection to Internet";
-  if (WiFi.status() == WL_CONNECTED)
-  {
-    timeClient.update();
-    currentDateTime=String(daysOfTheWeek[timeClient.getDay()])+", "+String(timeClient.getHours())+":"+String(timeClient.getMinutes())+":"+String(timeClient.getSeconds());
-    return currentDateTime;
-  }
-  else
-  {
-    return msgConnectionError;
+    prevTime[pumpNr]=millis();
   }
 }
 
@@ -1802,7 +1768,6 @@ void WebPage()
             client.println("<div class=\"row\"><div class=\"column\">");
             client.println("<p><i class=\"fas fa-stopwatch\" style=\"color:#476b6b;\"></i> <span class=\"labels\">Sensors read interval:</span> <span>"+(String(interval/60000))+"</span> <sup class=\"units\">min.</sup></p>");
             client.println("<p><i class=\"fas fa-stopwatch\" style=\"color:#476b6b;\"></i> <span class=\"labels\">Stabilization time:</span> <span>"+(String(stabilizationTime/60000))+"</span> <sup class=\"units\">min.</sup></p>");
-            client.println("<p><i class=\"fas fa-stopwatch\" style=\"color:#476b6b;\"></i> <span class=\"labels\">Last read:</span> <span>"+lastReadingTime+"</span></p>");
             client.println("</div><div class=\"column\">");
             client.println("<p><i class=\"fas fa-wifi\" style=\"color:#3366ff;\"></i> <span class=\"labels\">WIFI:</span> <span>"+WiFi.SSID()+"</span></p>");
             client.println("<p><i class=\"fas fa-tint\" style=\"color:#3366ff;\"></i> <span class=\"labels\">MQTT:</span> <span>"+mqttStateMsg+"</span></p>");
