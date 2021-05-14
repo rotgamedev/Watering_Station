@@ -74,7 +74,7 @@ uint16_t lux=0;
 
 //Moisture sensor
 const int airValue = 7000;//7350;  //6730; //10625; //15530;   //Sensor value in dry soil
-const int waterValue = 1400;//1430; //2400;  //6635;  //Sensor value in wet soil
+const int waterValue = 1430;//1400;//1430; //2400;  //6635;  //Sensor value in water
 
 int soilMoisturePercent[4]={0,0,0,0}; //soil moisture percentages
 int tempSoilMoisture[4]={0,0,0,0}; //temporary soil moisture percentages used to detect pump or sensor failure
@@ -187,250 +187,409 @@ String lastWatering[4]={"No watering since last run","No watering since last run
 
 //methods---------------------------------------------------------------------------
 
+void setup() {
+  Serial.begin(115200);
+
+  pcf8574.begin();
+  dht.begin();
+  ads.begin();
+  Wire.begin();
+  lightMeter.begin();
+  display.begin(SSD1306_SWITCHCAPVCC, 0x3C); //initialize with the I2C addr 0x3C (128x64)
+  display.setTextColor(WHITE);
+  display.setTextWrap(false);
+  xOled1=display.width();
+  xOled2=display.width();
+
+  pcf8574.pinMode(P0, OUTPUT); //delay 1
+  pcf8574.pinMode(P1, OUTPUT); //delay 2
+  pcf8574.pinMode(P2, OUTPUT); //delay 3
+  pcf8574.pinMode(P3, OUTPUT); //delay 4
+  pcf8574.pinMode(P4, OUTPUT); //no used
+  pcf8574.pinMode(P5, INPUT); //button2
+  pcf8574.pinMode(P6, OUTPUT); //RED LED
+  pcf8574.pinMode(P7, INPUT); //button
+  pcf8574.digitalWrite(P0, HIGH); //initial delay off
+  pcf8574.digitalWrite(P1, HIGH);
+  pcf8574.digitalWrite(P2, HIGH);
+  pcf8574.digitalWrite(P3, HIGH);
+  pcf8574.digitalWrite(P6, HIGH); //redled initial off
+  
+  // initialize GPIO 2 as an output.
+  pinMode(pinLed, OUTPUT);
+  digitalWrite(pinLed, HIGH); //off
+ 
+  // initalize GPIOs fo HC-SR04
+  pinMode(trigPin, OUTPUT);
+  pinMode(echoPin, INPUT);
+  digitalWrite(trigPin, HIGH);//initial off
+  
+  //welcome oled message
+  OledStarting();
+  delay(2000);
+  OledReadingSensors();
+  delay(3000);
+ 
+  //first reead sensors
+  TempHumRead();
+  LightRead();
+  MoistureSensorsRead();
+  WaterLevelRead();
+
+  //read mqtt config
+  ReadMqttConfig();
+  //read flower config
+  ReadFlowerConfig();
+
+  //start wifi connection etc
+  WifiSet();
+
+  //save mqtt config if need
+  SaveMqttConfig();
+  //save plants config if need
+  SaveFlowerConfig();
+  
+  //disabling the configuration save variable
+  shouldSaveConfig = false;
+
+  ReadMqttConfig();
+
+  if (isMqttConfig)
+  {
+    mqtt_server_pubsub=mqtt_server;
+    friendly_name_pubsub=friendly_name;
+    mqtt_username_pubsub=mqtt_username;
+    mqtt_password_pubsub=mqtt_password;
+  
+    client.setBufferSize(255);
+    client.setServer(mqtt_server_pubsub.c_str(),atoi(mqtt_port));
+    Serial.println("mqtt config");
+  }
+
+  stabilizationTime=atoi(sensor_stab)*60000;
+  Serial.println("Sensor stabilization time: "+String(stabilizationTime) + " ms");
+  CheckWifiState();
+  if (WiFi.status() == WL_CONNECTED)
+  {
+    if (isMqttConfig) //when the configuration is created it sends messages to the mqtt server
+    {
+      if (client.connect(friendly_name_pubsub.c_str(),mqtt_username_pubsub.c_str(),mqtt_password_pubsub.c_str()))
+      {
+        int activeValue[4]={atoi(f1_active), atoi(f2_active), atoi(f3_active), atoi(f4_active)};
+        mqttState=true;
+        publishAirData(temp,humidity,lux);
+        for (int i = 0; i <= 3; i++)
+        {
+          if(activeValue[i]==1)
+          {
+            publishFlowerData(i+1);
+          }
+        }
+        Serial.println("Message send");
+      }
+      else
+      {
+        mqttState=false;
+      }
+    }
+    timeClient.begin();
+  }
+  CheckMQTTState();
+  lastReadingTime=GetDateTime();
+  server.begin();
+  Serial.println("End setup");
+}
+
+// the loop function runs over and over again forever-----------------------------------------------------------------------
+void loop()
+{
+  unsigned long currentMillis = millis();
+  BtnCheck();
+  Btn2Check();
+
+  int activeValue[4]={atoi(f1_active), atoi(f2_active), atoi(f3_active), atoi(f4_active)};
+  
+  if (currentMillis - prevOledTime >= oledRefreshTime)  //oled refresh interval
+  {
+    prevOledTime = currentMillis;
+    OledPrint();
+  } 
+ 
+  if (currentMillis - previousMillis >= interval)  //sensors read interval
+  {
+    previousMillis = currentMillis;
+    OledReadingSensors();
+
+    TempHumRead(); //read air temperature and humidity
+    LightRead();//read light intensity
+    MoistureSensorsRead(); //soil moisture reading
+    WaterLevelRead(); //check water lvl in tank
+    WateringFlowers(); //start watering process if needed
+    CheckWifiState(); //check wifi state
+    
+    if (WiFi.status() == WL_CONNECTED)
+    {
+      if (isMqttConfig) //when the configuration is created it sends messages to the mqtt server
+      {
+        if (client.connect(friendly_name_pubsub.c_str(),mqtt_username_pubsub.c_str(),mqtt_password_pubsub.c_str()))
+        {
+          mqttState=true;
+          publishAirData(temp,humidity,lux);
+          for (int i = 0; i <= 3; i++)
+          {
+            if(activeValue[i]==1)
+            {
+              publishFlowerData(i+1);
+            }
+          }
+          Serial.println("Message send");
+        }
+        else
+        {
+          mqttState=false;
+        }
+      }
+    }
+    CheckMQTTState();
+    lastReadingTime=GetDateTime();
+  }
+
+  WebPage();
+
+  for (int i = 0; i <= 3; i++) //countdown of the stabilization time of sensors
+  {
+    if(needStabilization[i])
+    {
+      currentTime[i] = millis();
+    
+      if (currentTime[i] - prevTime[i] >= stabilizationTime)
+      {
+        needStabilization[i]=false;
+      }
+    }
+  }
+  
+}
+
+String GetDateTime()
+{
+  String currentDateTime="";
+  String msgConnectionError="No connection to Internet";
+  if (WiFi.status() == WL_CONNECTED)
+  {
+    timeClient.update();
+    unsigned long epochTime = timeClient.getEpochTime();
+    struct tm *ptm = gmtime ((time_t *)&epochTime);
+
+    int monthDay = ptm->tm_mday;
+    int currentMonth = ptm->tm_mon+1;
+    String currentMonthName = months[currentMonth-1];
+    int currentYear = ptm->tm_year+1900;
+    String currentDate = String(currentYear) + "." + String(currentMonth) + "." + String(monthDay);
+    currentDateTime = currentMonthName + ", "+ currentDate + ", " + String(timeClient.getFormattedTime());
+    //currentDateTime=String(daysOfTheWeek[timeClient.getDay()])+", "+String(timeClient.getHours())+":"+String(timeClient.getMinutes())+":"+String(timeClient.getSeconds());
+    //currentDateTime=String(weekDays[timeClient.getDay()])+", "+String(timeClient.getFormattedTime());
+    Serial.println(timeClient.getFormattedTime());
+    return currentDateTime;
+  }
+  else
+  {
+    return msgConnectionError;
+  }
+  
+}
+
+void CheckWifiState()
+{
+  if (WiFi.status() == WL_CONNECTED)
+  {
+    wifiState="OK";
+    wifiStateCount=0;
+  }
+  else
+  {
+    wifiState="NO!";
+    wifiStateCount++;
+    //WiFi.begin();
+    if (wifiStateCount==10)
+    {
+      OledRebooting();
+      ESP.restart();
+    }
+    WiFi.reconnect();
+  }
+}
+
+void CheckMQTTState()
+{
+  if (mqttState)
+  {
+    mqttStateMsg="OK";
+  }
+  else
+  {
+    mqttStateMsg="NO!";
+  }
+}
+
+
+
+void BtnCheck()
+{
+    currentState = pcf8574.digitalRead(P7,true);
+    
+    if(lastState == LOW && currentState == HIGH)
+    {        
+      // button is pressed
+      pressedTime = millis();
+    }
+    else if(lastState == HIGH && currentState == LOW)
+    {
+      // button is released
+      releasedTime = millis();
+
+      long pressDuration = releasedTime - pressedTime;
+
+      if( pressDuration < shortPressTime )
+      {
+        Serial.println("A short press is detected");
+        if (displayOn)
+        {
+          ShowSavedFlowerConfigOled();
+        }
+        else
+        {
+          display.ssd1306_command(SSD1306_DISPLAYON);
+          ShowSavedFlowerConfigOled();
+          display.ssd1306_command(SSD1306_DISPLAYOFF);
+        } 
+        
+       /* 
+        if (strcmp(mqtt_port, "1883")==0)
+        {
+          Serial.println("OK");
+        } else {
+          Serial.println("Not OK");
+        }
+
+        int val = atoi(mqtt_port);
+        
+        String name123=friendly_name;
+       
+        Serial.print("second char is: ");
+        Serial.println(f2_min[1]);
+
+        if(isDigit(f2_min[0]) && (isDigit(f2_min[1]) || f2_min[1]==NULL))
+        {
+          Serial.println("f1_min is a number");
+        }
+        else
+        {
+          Serial.println("f1_min is not a number");
+        }*/
+          
+      }
+      else if (pressDuration > shortPressTime && pressDuration < 5000)
+      {
+        Serial.println("A long press is detected");
+        if (!displayOn)
+        {
+          display.ssd1306_command(SSD1306_DISPLAYON);
+        }
+        
+        OledRebooting();
+        ESP.restart();
+      }
+      else
+      {
+        Serial.println("A very long press is detected");
+        if (!displayOn)
+        {
+          display.ssd1306_command(SSD1306_DISPLAYON);
+        }
+        /*if(SPIFFS.format())
+        {
+          Serial.println("File system Formatted");
+        }
+        else
+        {
+          Serial.println("File system formatting error");
+        }*/
+        OledResetting();
+        
+        WiFi.disconnect(true);
+        wifiManager.resetSettings();
+        delay(1000);
+        ESP.restart();
+      }
+    }
+
+  // save the the last state
+  lastState = currentState;
+}
+
+void Btn2Check()
+{
+  currentState2 = pcf8574.digitalRead(P5,true);
+    
+  if(lastState2 == LOW && currentState2 == HIGH)
+  {        
+    // button is pressed
+    pressedTime2 = millis();
+  }
+  else if(lastState2 == HIGH && currentState2 == LOW)
+  {
+    // button is released
+    releasedTime2 = millis();
+
+    long pressDuration2 = releasedTime2 - pressedTime2;
+    if( pressDuration2 < shortPressTime2 )
+    {
+      Serial.println("A short press is detected");
+      if (displayOn)
+      {
+        display.ssd1306_command(SSD1306_DISPLAYOFF);
+        Serial.println("Display OFF");
+        displayOn=false;
+      }
+      else
+      {
+        display.ssd1306_command(SSD1306_DISPLAYON);
+        Serial.println("Display ON");
+        displayOn=true;
+      }
+
+    }
+    else if (pressDuration2 > shortPressTime2 && pressDuration2 < 5000)
+    {
+      //not used
+    }
+    else
+    {
+      OledFormatting();
+      if(SPIFFS.format())
+      {
+        Serial.println("File system Formatted");
+      }
+      else
+      {
+        Serial.println("File system formatting error");
+      }
+      WiFi.disconnect(true);
+      wifiManager.resetSettings();
+      delay(1000);
+      ESP.restart();
+    }
+  }
+  lastState2 = currentState2;
+}
+
+
+
 //performed when there is a configuration change in the wifimanager
 void saveConfigCallback () {
   Serial.println("Should save config");
   shouldSaveConfig = true;
-}
-
-//performed when there is a connection error
-void configModeCallback (WiFiManager *myWiFiManager) {
-    display.clearDisplay();
-    display.setTextSize(1);
-    display.setCursor(0,2);
-    display.println("Connect to SSID");
-    display.setCursor(0,17);
-    display.println("WateringStation");
-    display.setCursor(0,32);
-    display.println("192.168.4.1");
-    display.setCursor(0,47);
-    display.println("to configure");
-    display.display();
-    display.clearDisplay();
-}
-
-//reading mqtt configuration file
-void ReadMqttConfig(){
-  if (SPIFFS.begin()) {
-    Serial.println("Mounted file system");
-    if (SPIFFS.exists("/config.json")) 
-    {
-      //file exists, reading and loading
-      Serial.println("Reading mqtt config file");
-      File configFile = SPIFFS.open("/config.json", "r");
-      if (configFile)
-      {
-        Serial.println("Opened mqtt config file");
-        size_t size = configFile.size();
-        // Allocate a buffer to store contents of the file.
-        std::unique_ptr<char[]> buf(new char[size]);
-        configFile.readBytes(buf.get(), size);
-        
-        DynamicJsonBuffer jsonBuffer;
-        JsonObject& json = jsonBuffer.parseObject(buf.get());
-        json.printTo(Serial);
-        if (json.success())
-        {
-          Serial.println("\nparsed json");
-          strcpy(friendly_name, json["friendly_name"]);          
-          strcpy(mqtt_server, json["mqtt_server"]);
-          strcpy(mqtt_port, json["mqtt_port"]);
-          strcpy(mqtt_username, json["mqtt_username"]);
-          strcpy(mqtt_password, json["mqtt_password"]);
-          
-          String serverIP=mqtt_server;
-          String deviceName=friendly_name;
-          
-          if (serverIP=="" || serverIP==NULL || deviceName=="" || deviceName==NULL)
-          {
-            isMqttConfig=false;
-            Serial.println("No mqtt config");
-          }
-          else
-          {
-            isMqttConfig=true;
-            Serial.println("Found mqtt config");
-          }
-          
-        }
-        else
-        {
-          Serial.println("Failed to load mqtt config!");
-            //clean FS, for testing
-            //SPIFFS.format();
-            //delay(500);
-            //wifiManager.resetSettings();
-            //delay(500);
-            //ESP.restart()
-            //delay(1000);
-            OledConfigFileError("config.json");
-        }
-      }
-    }
-    else
-    {
-      Serial.println("File does not exist!");
-      OledConfigFileError("config.json");
-    }
-  } else {
-    Serial.println("Failed to mount FS!");
-  }
-}
-
-void OledConfigFileError(String fileName)
-{
-   display.clearDisplay();
-   display.setTextSize(1);
-   display.setCursor(0,2);
-   display.println("The file");
-   display.setCursor(0,17);
-   display.println(fileName);
-   display.setCursor(0,32);
-   display.println("cannot be");
-   display.setCursor(0,47);
-   display.println("loaded!");
-   display.display();
-   display.clearDisplay();
-   delay(2000);
-}
-
-//saving mqtt data to the json file (when shouldSaveConfig = true))
-void SaveMqttConfig(){
-  if (shouldSaveConfig) {
-    Serial.println("Saving mqtt config file");
-    
-    DynamicJsonBuffer jsonBuffer;
-    JsonObject& json = jsonBuffer.createObject();
-    json["friendly_name"] = friendly_name;
-    json["mqtt_server"] = mqtt_server;
-    json["mqtt_port"] = mqtt_port;
-    json["mqtt_username"] = mqtt_username;
-    json["mqtt_password"] = mqtt_password;
-
-    File configFile = SPIFFS.open("/config.json", "w");
-    if (!configFile) {
-      Serial.println("Failed to open config file for writing!");
-    }
-
-    json.printTo(Serial);
-    json.printTo(configFile);
-    configFile.close();
-    //end save
-    //shouldSaveConfig = false;
-  }
-}
-
-//reading plants configuration file
-void ReadFlowerConfig()
-{
-  if (SPIFFS.begin())
-  {
-    Serial.println("Mounted file system");
-    if (SPIFFS.exists("/flower.json"))
-    {
-      //file exists, reading and loading
-      Serial.println("Reading flower config file");
-      File configFile = SPIFFS.open("/flower.json", "r");
-      if (configFile)
-      {
-        Serial.println("Opened flower config file");
-        size_t size = configFile.size();
-        // Allocate a buffer to store contents of the file.
-        std::unique_ptr<char[]> buf(new char[size]);
-        configFile.readBytes(buf.get(), size);
-        
-        DynamicJsonBuffer jsonBuffer;
-        JsonObject& json = jsonBuffer.parseObject(buf.get());
-        json.printTo(Serial);
-        if (json.success())
-        {
-          Serial.println("\nparsed json");
-
-          strcpy(f1_name, json["f1_name"]);          
-          strcpy(f1_min, json["f1_min"]);
-          strcpy(f1_max, json["f1_max"]);
-          strcpy(f1_active, json["f1_active"]);
-
-          strcpy(f2_name, json["f2_name"]);          
-          strcpy(f2_min, json["f2_min"]);
-          strcpy(f2_max, json["f2_max"]);
-          strcpy(f2_active, json["f2_active"]);
-
-          strcpy(f3_name, json["f3_name"]);          
-          strcpy(f3_min, json["f3_min"]);
-          strcpy(f3_max, json["f3_max"]);
-          strcpy(f3_active, json["f3_active"]);
-
-          strcpy(f4_name, json["f4_name"]);          
-          strcpy(f4_min, json["f4_min"]);
-          strcpy(f4_max, json["f4_max"]);
-          strcpy(f4_active, json["f4_active"]);
-
-          strcpy(sensor_stab, json["sensor_stab"]);
-
-          isFlowerConfig=true;
-
-        } else {
-          Serial.println("Failed to load flower config!");
-            //clean FS, for testing
-            //SPIFFS.format();
-            //delay(500);
-            //wifiManager.resetSettings();
-            //delay(500);
-            //ESP.restart()
-            //delay(1000);
-            OledConfigFileError("flower.json");
-        }
-      }
-    }
-    else
-    {
-      Serial.println("File does not exist!");
-      OledConfigFileError("flower.json");
-    }
-  }
-  else
-  {
-    Serial.println("Failed to mount FS!");
-  }
-}
-
-//saving plants data to the json file (when shouldSaveConfig = true))
-void SaveFlowerConfig(){
-  if (shouldSaveConfig) {
-    Serial.println("Saving plants config file");
-    
-    DynamicJsonBuffer jsonBuffer;
-    JsonObject& json = jsonBuffer.createObject();
-    json["f1_name"] = f1_name;
-    json["f1_min"] = f1_min;
-    json["f1_max"] = f1_max;
-    json["f1_active"] = f1_active;
-    json["f2_name"] = f2_name;
-    json["f2_min"] = f2_min;
-    json["f2_max"] = f2_max;
-    json["f2_active"] = f2_active;
-    json["f3_name"] = f3_name;
-    json["f3_min"] = f3_min;
-    json["f3_max"] = f3_max;
-    json["f3_active"] = f3_active;
-    json["f4_name"] = f4_name;
-    json["f4_min"] = f4_min;
-    json["f4_max"] = f4_max;
-    json["f4_active"] = f4_active;
-    json["sensor_stab"] = sensor_stab;
-
-    File configFile = SPIFFS.open("/flower.json", "w");
-    if (!configFile)
-    {
-      Serial.println("Failed to open config file for writing!");
-    }
-    json.printTo(Serial);
-    json.printTo(configFile);
-    configFile.close();
-    //end save
-    //shouldSaveConfig = false;
-  }
 }
 
 //wifimanager configuration metda
@@ -561,15 +720,7 @@ void WifiSet(){
   {
     //if you get here you have connected to the WiFi    
     Serial.println("Connection succeeded!");
-    display.clearDisplay();
-    display.setTextSize(2);
-    display.setCursor(0,10);
-    display.println("Connected");
-    display.setCursor(0,40);
-    display.println("to WiFi");
-    display.display();
-    delay(5000);
-    display.clearDisplay();
+    OledConnectedToWiFi();
   }
 
   //assigning data to variables - mqtt and plants
@@ -685,1182 +836,5 @@ void WifiSet(){
   {
     strcpy(sensor_stab,"30");
     Serial.println("Setting default sensor stabilization time");
-  }
-  
-}
-
-void setup() {
-  Serial.begin(115200);
-
-  pcf8574.begin();
-  dht.begin();
-  ads.begin();
-  Wire.begin();
-  lightMeter.begin();
-  display.begin(SSD1306_SWITCHCAPVCC, 0x3C); //initialize with the I2C addr 0x3C (128x64)
-  display.setTextColor(WHITE);
-  display.setTextWrap(false);
-  xOled1=display.width();
-  xOled2=display.width();
-
-  pcf8574.pinMode(P0, OUTPUT); //delay 1
-  pcf8574.pinMode(P1, OUTPUT); //delay 2
-  pcf8574.pinMode(P2, OUTPUT); //delay 3
-  pcf8574.pinMode(P3, OUTPUT); //delay 4
-  pcf8574.pinMode(P4, OUTPUT); //no used
-  pcf8574.pinMode(P5, INPUT); //button2
-  pcf8574.pinMode(P6, OUTPUT); //RED LED
-  pcf8574.pinMode(P7, INPUT); //button
-  pcf8574.digitalWrite(P0, HIGH); //initial delay off
-  pcf8574.digitalWrite(P1, HIGH);
-  pcf8574.digitalWrite(P2, HIGH);
-  pcf8574.digitalWrite(P3, HIGH);
-  pcf8574.digitalWrite(P6, HIGH); //redled initial off
-  
-  // initialize GPIO 2 as an output.
-  pinMode(pinLed, OUTPUT);
-  digitalWrite(pinLed, HIGH); //off
- 
-  // initalize GPIOs fo HC-SR04
-  pinMode(trigPin, OUTPUT);
-  pinMode(echoPin, INPUT);
-  digitalWrite(trigPin, HIGH);//initial off
-  
-  //welcome oled message
-  display.clearDisplay(); 
-  display.setTextSize(2);
-  display.setCursor(0,22);
-  display.println("Starting..");
-  display.display();
-  delay(2000);
-  display.clearDisplay();
-  display.setCursor(0,22);
-  display.println("Reading");
-  display.setCursor(0,40);
-  display.println("sensors...");
-  display.display();
-  delay(3000);
- 
-  //first reead sensors
-  TempHumRead();
-  LightRead();
-  MoistureSensorsRead();
-  WaterLevelRead();
-
-  //read mqtt config
-  ReadMqttConfig();
-  //read flower config
-  ReadFlowerConfig();
-
-  //start wifi connection etc
-  WifiSet();
-
-  //save mqtt config if need
-  SaveMqttConfig();
-  //save plants config if need
-  SaveFlowerConfig();
-  
-  //disabling the configuration save variable
-  shouldSaveConfig = false;
-
-  ReadMqttConfig();
-
-  if (isMqttConfig)
-  {
-    mqtt_server_pubsub=mqtt_server;
-    friendly_name_pubsub=friendly_name;
-    mqtt_username_pubsub=mqtt_username;
-    mqtt_password_pubsub=mqtt_password;
-  
-    client.setBufferSize(255);
-    client.setServer(mqtt_server_pubsub.c_str(),atoi(mqtt_port));
-    Serial.println("mqtt config");
-  }
-
-  stabilizationTime=atoi(sensor_stab)*60000;
-  Serial.println("Sensor stabilization time: "+String(stabilizationTime) + " ms");
-  CheckWifiState();
-  if (WiFi.status() == WL_CONNECTED)
-  {
-    if (isMqttConfig) //when the configuration is created it sends messages to the mqtt server
-    {
-      if (client.connect(friendly_name_pubsub.c_str(),mqtt_username_pubsub.c_str(),mqtt_password_pubsub.c_str()))
-      {
-        int activeValue[4]={atoi(f1_active), atoi(f2_active), atoi(f3_active), atoi(f4_active)};
-        mqttState=true;
-        publishAirData(temp,humidity,lux);
-        for (int i = 0; i <= 3; i++)
-        {
-          if(activeValue[i]==1)
-          {
-            publishFlowerData(i+1);
-          }
-        }
-        Serial.println("Message send");
-      }
-      else
-      {
-        mqttState=false;
-      }
-    }
-    timeClient.begin();
-  }
-  CheckMQTTState();
-  lastReadingTime=GetDateTime();
-  server.begin();
-  Serial.println("End setup");
-}
-
-void BtnCheck()
-{
-    currentState = pcf8574.digitalRead(P7,true);
-    
-    if(lastState == LOW && currentState == HIGH)
-    {        
-      // button is pressed
-      pressedTime = millis();
-    }
-    else if(lastState == HIGH && currentState == LOW)
-    {
-      // button is released
-      releasedTime = millis();
-
-      long pressDuration = releasedTime - pressedTime;
-
-      if( pressDuration < shortPressTime )
-      {
-        Serial.println("A short press is detected");
-        if (displayOn)
-        {
-          ShowSavedFlowerConfigOled();
-        }
-        else
-        {
-          display.ssd1306_command(SSD1306_DISPLAYON);
-          ShowSavedFlowerConfigOled();
-          display.ssd1306_command(SSD1306_DISPLAYOFF);
-        } 
-        
-       /* 
-        if (strcmp(mqtt_port, "1883")==0)
-        {
-          Serial.println("OK");
-        } else {
-          Serial.println("Not OK");
-        }
-
-        int val = atoi(mqtt_port);
-        
-        String name123=friendly_name;
-       
-        Serial.print("second char is: ");
-        Serial.println(f2_min[1]);
-
-        if(isDigit(f2_min[0]) && (isDigit(f2_min[1]) || f2_min[1]==NULL))
-        {
-          Serial.println("f1_min is a number");
-        }
-        else
-        {
-          Serial.println("f1_min is not a number");
-        }*/
-          
-      }
-      else if (pressDuration > shortPressTime && pressDuration < 5000)
-      {
-        Serial.println("A long press is detected");
-        if (!displayOn)
-        {
-          display.ssd1306_command(SSD1306_DISPLAYON);
-        }
-        
-        display.clearDisplay(); 
-        display.setTextSize(2);
-        display.setCursor(0,22);
-        display.println("Rebooting..");
-        display.display();
-        delay(2000);
-        ESP.restart();
-      }
-      else
-      {
-        Serial.println("A very long press is detected");
-        if (!displayOn)
-        {
-          display.ssd1306_command(SSD1306_DISPLAYON);
-        }
-        /*if(SPIFFS.format())
-        {
-          Serial.println("File system Formatted");
-        }
-        else
-        {
-          Serial.println("File system formatting error");
-        }*/
-        display.clearDisplay(); 
-        display.setTextSize(2);
-        display.setCursor(0,22);
-        display.println("Resetting..");
-        display.display();
-        delay(2000);
-        
-        WiFi.disconnect(true);
-        wifiManager.resetSettings();
-        delay(1000);
-        ESP.restart();
-      }
-    }
-
-  // save the the last state
-  lastState = currentState;
-}
-
-void Btn2Check()
-{
-  currentState2 = pcf8574.digitalRead(P5,true);
-    
-  if(lastState2 == LOW && currentState2 == HIGH)
-  {        
-    // button is pressed
-    pressedTime2 = millis();
-  }
-  else if(lastState2 == HIGH && currentState2 == LOW)
-  {
-    // button is released
-    releasedTime2 = millis();
-
-    long pressDuration2 = releasedTime2 - pressedTime2;
-    if( pressDuration2 < shortPressTime2 )
-    {
-      Serial.println("A short press is detected");
-      if (displayOn)
-      {
-        display.ssd1306_command(SSD1306_DISPLAYOFF);
-        Serial.println("Display OFF");
-        displayOn=false;
-      }
-      else
-      {
-        display.ssd1306_command(SSD1306_DISPLAYON);
-        Serial.println("Display ON");
-        displayOn=true;
-      }
-
-    }
-    else if (pressDuration2 > shortPressTime2 && pressDuration2 < 5000)
-    {
-      //not used
-    }
-    else
-    {
-      display.clearDisplay(); 
-      display.setTextSize(2);
-      display.setCursor(0,22);
-      display.println("Formatting");
-      display.setCursor(0,36);
-      display.print("memory...");
-      display.display();
-      delay(2000);
-      if(SPIFFS.format())
-      {
-        Serial.println("File system Formatted");
-      }
-      else
-      {
-        Serial.println("File system formatting error");
-      }
-      WiFi.disconnect(true);
-      wifiManager.resetSettings();
-      delay(1000);
-      ESP.restart();
-    }
-  }
-  lastState2 = currentState2;
-}
-
-//low water level led on
-void WarningLedON()
-{
-  pcf8574.digitalWrite(P6, LOW);
-}
-
-//low water level led off
-void WarningLedOFF()
-{
-  pcf8574.digitalWrite(P6, HIGH);
-}
-
-void publishAirData(float p_temperature, float p_humidity, uint16_t p_light) {
-  String airTopic = friendly_name_pubsub+"/air";
-  
-  // create a JSON object
-  // doc : https://github.com/bblanchon/ArduinoJson/wiki/API%20Reference
-  StaticJsonBuffer<200> jsonBuffer;
-  JsonObject& root = jsonBuffer.createObject();
-  // INFO: the data must be converted into a string;
-  root["temperature"] = (String)p_temperature;
-  root["humidity"] = (String)p_humidity;
-  root["light"] = (String)p_light;
-  root["water"] = (String)waterLvl;
-  root.prettyPrintTo(Serial);
-  //Serial.println("");
-  /*
-     {
-        "temperature": "23.20" ,
-        "humidity": "43.70",
-        "light": "12"
-        "water": "80"
-     }
-  */
-  char data[200];
-  root.printTo(data, root.measureLength() + 1);
-  client.publish(airTopic.c_str(), data, true);
-  yield();
-}
-
-void publishFlowerData(int flower_id) {
-  
-  String msgConfigError = "not configured";
-  
-  String flowerTopic = friendly_name_pubsub+"/flower"+String(flower_id);
-
-  String flowerName[4]={String(f1_name),String(f2_name),String(f3_name),String(f4_name)};
-  String flowerMoistures[4]={String(soilMoisturePercent[0]),String(soilMoisturePercent[1]),String(soilMoisturePercent[2]),String(soilMoisturePercent[3])};
-  String flowerLastWatering[4]={lastWatering[0],lastWatering[1],lastWatering[2],lastWatering[3]};
-
-  int activeValue[4]={atoi(f1_active), atoi(f2_active), atoi(f3_active), atoi(f4_active)};
-  for (int i = 0; i <= 3; i++)
-   {
-     if(activeValue[i]!=1)
-     {
-       flowerName[i]=msgConfigError;
-       flowerMoistures[i]=msgConfigError;
-     }
-   }
-
-  // create a JSON object
-  // doc : https://github.com/bblanchon/ArduinoJson/wiki/API%20Reference
-  StaticJsonBuffer<200> jsonBuffer;
-  JsonObject& root = jsonBuffer.createObject();
-  // INFO: the data must be converted into a string;
-  root["flower"+String(flower_id)+"_name"] = String(flowerName[flower_id-1]);
-  root["flower"+String(flower_id)+"_moisture"] = String(flowerMoistures[flower_id-1]);
-  root["flower"+String(flower_id)+"_lastWatering"] = String(flowerLastWatering[flower_id-1]);
-  
-  root.prettyPrintTo(Serial);
-  char data[200];
-  root.printTo(data, root.measureLength() + 1);
-  client.publish(flowerTopic.c_str(), data, true);
-  yield();
-}
-
-// the loop function runs over and over again forever-----------------------------------------------------------------------
-void loop()
-{
-  unsigned long currentMillis = millis();
-  BtnCheck();
-  Btn2Check();
-
-  int activeValue[4]={atoi(f1_active), atoi(f2_active), atoi(f3_active), atoi(f4_active)};
-  
-  if (currentMillis - prevOledTime >= oledRefreshTime)  //oled refresh interval
-  {
-    prevOledTime = currentMillis;
-    OledPrint();
-  } 
- 
-  if (currentMillis - previousMillis >= interval)  //sensors read interval
-  {
-    previousMillis = currentMillis;
-    OledReadingSensors();
-
-    TempHumRead(); //read air temperature and humidity
-    LightRead();//read light intensity
-    MoistureSensorsRead(); //soil moisture reading
-    WaterLevelRead(); //check water lvl in tank
-    WateringFlowers(); //start watering process if needed
-    CheckWifiState(); //check wifi state
-    
-    if (WiFi.status() == WL_CONNECTED)
-    {
-      if (isMqttConfig) //when the configuration is created it sends messages to the mqtt server
-      {
-        if (client.connect(friendly_name_pubsub.c_str(),mqtt_username_pubsub.c_str(),mqtt_password_pubsub.c_str()))
-        {
-          mqttState=true;
-          publishAirData(temp,humidity,lux);
-          for (int i = 0; i <= 3; i++)
-          {
-            if(activeValue[i]==1)
-            {
-              publishFlowerData(i+1);
-            }
-          }
-          Serial.println("Message send");
-        }
-        else
-        {
-          mqttState=false;
-        }
-      }
-    }
-    CheckMQTTState();
-    lastReadingTime=GetDateTime();
-  }
-
-  WebPage();
-
-  for (int i = 0; i <= 3; i++) //countdown of the stabilization time of sensors
-  {
-    if(needStabilization[i])
-    {
-      currentTime[i] = millis();
-    
-      if (currentTime[i] - prevTime[i] >= stabilizationTime)
-      {
-        needStabilization[i]=false;
-      }
-    }
-  }
-  
-}
-
-//read light intensity
-void LightRead()
-{
-    lux = lightMeter.readLightLevel();
-    Serial.println("Light: " + String(lux) + " lx"); 
-}
-
-//read air temperture and humidity
-void TempHumRead()
-{
-    float newT = dht.readTemperature();
-    // Read temperature as Fahrenheit (isFahrenheit = true)
-    //float newT = dht.readTemperature(true);
-    // if temperature read failed, don't change t value
-    if (isnan(newT))
-    {
-      Serial.println("Failed to read from DHT sensor!");
-    }
-    else
-    {
-      temp = newT;
-      Serial.println("Temperature " + String(temp) + " C"); 
-    }
-    // Read Humidity
-    float newH = dht.readHumidity();
-    // if humidity read failed, don't change h value 
-    if (isnan(newH))
-    {
-      Serial.println("Failed to read from DHT sensor!");
-    }
-    else
-    {
-      humidity = newH;
-      Serial.println("Humidity " + String(humidity) + " %");
-    }
-}
-
-
-//read moisture sensors
-void MoistureSensorsRead()
-{
- // int16_t adc[4];
-  int16_t adc;
-  int32_t aM;
-  int mn = 10;
-  
-  for (int i = 0; i <= 3; i++)
-  {
-    int16_t minValue=0;
-    int16_t maxValue=0;
-    
-    int32_t sum = 0;
-      
-    for (int m = 0; m < mn; m++)
-    {
-       adc= ads.readADC_SingleEnded(i);
-       
-       if(m==0)
-       {
-        minValue=adc;
-        maxValue=adc;
-       }
-       
-       if (adc>maxValue)
-       {
-          maxValue=adc;
-       }else if (adc<minValue)
-       {
-          minValue=adc;
-       }
-       sum+=adc;
-       Serial.println(String(adc)+" "+String(i));
-
-    }
-    //Serial.println(sum);
-    Serial.println("max value: "+ String(maxValue));
-    Serial.println("min value: "+ String(minValue));
-    Serial.println("suma - "+String(sum));
-    aM=((sum-maxValue)-minValue)/(mn-2);
-    
-    //adc[i]= ads.readADC_SingleEnded(i);
-    //soilMoisturePercent[i] = map(adc[i], airValue, waterValue, 0, 100);
-    //Serial.println(adc[i]);
-    soilMoisturePercent[i] = map(aM, airValue, waterValue, 0, 100);
-    Serial.println("average value - "+ String(aM));
-  }
-  
-  for (int i = 0; i <= 3; i++)
-  {
-    if(soilMoisturePercent[i] > 100)
-    {
-      Serial.println("Sensor "+String(i+1)+": Humidity: 100 %");
-      soilMoisturePercent[i]=100;
-    }
-    else if(soilMoisturePercent[i] <0)
-    {
-      Serial.println("Sensor "+String(i+1)+": Humidity: 0 %");
-      soilMoisturePercent[i]=0;
-    }
-    else if(soilMoisturePercent[i] >=0 && soilMoisturePercent[i] <= 100)
-    {
-      Serial.println("Sensor "+String(i+1)+": Humidity: " + String(soilMoisturePercent[i]) + " %");
-    }
-  }
-  
-}
-
-//watering
-void WateringFlowers()
-{
-  int flowerMoistureAvrg[4]={0,0,0,0};
-
-  if (isFlowerConfig && !noWater)
-  {
-    int isActive[4]={atoi(f1_active), atoi(f2_active), atoi(f3_active), atoi(f4_active)};
-    int flowerMin[4]={atoi(f1_min), atoi(f2_min), atoi(f3_min), atoi(f4_min)};
-    int flowerMax[4]={atoi(f1_max), atoi(f2_max), atoi(f3_max), atoi(f4_max)};
-  
-    for (int i = 0; i <= 3; i++)
-    {
-      if (isActive[i]==1 && !needStabilization[i])
-      {
-        flowerMoistureAvrg[i]=(flowerMin[i]+flowerMax[i])/2;
-
-        if(flowerMoistureAvrg[i]!=0)
-        {
-            if (flowerWatering[i])
-            {
-              if(soilMoisturePercent[i]<flowerMoistureAvrg[i])
-              {
-                if(soilMoisturePercent[i]<=tempSoilMoisture[i])
-                {
-                  errorCount[i]++;
-                  if (errorCount[i]==5)
-                  {
-                    pumpError[i]=true;
-                  }
-                  else
-                  {
-                    RunPump(i,wateringTime);
-                    tempSoilMoisture[i]=soilMoisturePercent[i];               
-                  }
-                }
-                else
-                {
-                  if (pumpError[i])
-                  {
-                    pumpError[i]=false;
-                  }
-                  errorCount[i]=0;
-                  RunPump(i,wateringTime);
-                  tempSoilMoisture[i]=soilMoisturePercent[i];
-                }
-              }
-              else
-              {
-                flowerWatering[i]=false;
-                Serial.println("Watering process completed for flower no: " + String(i+1));
-                tempSoilMoisture[i]=0;
-              }
-            }        
-            else if (soilMoisturePercent[i]<flowerMin[i] && !needStabilization[i])
-            {
-              flowerWatering[i]=true;
-              Serial.println("Watering process started for flower no: " + String(i+1));
-              if (!pumpError[i])
-              {
-                RunPump(i,wateringTime); //nr pompy i czas podlewania
-                tempSoilMoisture[i]=soilMoisturePercent[i]; //save temporary moisture
-              }
-            }  
-        }        
-      }
-    }
-  }
-  else if (noWater)
-  {
-    for (int i = 0; i <= 3; i++)
-    {
-      flowerWatering[i]=false;
-    }
-    Serial.println("Watering plants completed due to lack of water.");
-  }
-}
-
-
-//starting the selected water pump
-void RunPump(int pumpNr, long duratioin)
-{
-  WaterLevelRead();
-  if (!noWater && !needStabilization[pumpNr])
-  {
-    pcf8574.digitalWrite(pumpNr, LOW); //run pump
-    Serial.println("Pump no: " + String(pumpNr)+" is running");
-    OledWatering(pumpNr);
-    delay(duratioin);
-    pcf8574.digitalWrite(pumpNr, HIGH); //stop pump
-    delay(250);
-    Serial.println("Pump no: " + String(pumpNr)+" has stoped");
-    needStabilization[pumpNr]=true;
-    prevTime[pumpNr]=millis(); 
-    lastWatering[pumpNr]=GetDateTime();
-
-  }
-}
-
-String GetDateTime()
-{
-  String currentDateTime="";
-  String msgConnectionError="No connection to Internet";
-  if (WiFi.status() == WL_CONNECTED)
-  {
-    timeClient.update();
-    unsigned long epochTime = timeClient.getEpochTime();
-    struct tm *ptm = gmtime ((time_t *)&epochTime);
-
-    int monthDay = ptm->tm_mday;
-    int currentMonth = ptm->tm_mon+1;
-    String currentMonthName = months[currentMonth-1];
-    int currentYear = ptm->tm_year+1900;
-    String currentDate = String(currentYear) + "." + String(currentMonth) + "." + String(monthDay);
-    currentDateTime = currentMonthName + ", "+ currentDate + ", " + String(timeClient.getFormattedTime());
-    //currentDateTime=String(daysOfTheWeek[timeClient.getDay()])+", "+String(timeClient.getHours())+":"+String(timeClient.getMinutes())+":"+String(timeClient.getSeconds());
-    //currentDateTime=String(weekDays[timeClient.getDay()])+", "+String(timeClient.getFormattedTime());
-    Serial.println(timeClient.getFormattedTime());
-    return currentDateTime;
-  }
-  else
-  {
-    return msgConnectionError;
-  }
-  
-}
-
-void CheckWifiState()
-{
-  if (WiFi.status() == WL_CONNECTED)
-  {
-    wifiState="OK";
-    wifiStateCount=0;
-  }
-  else
-  {
-    wifiState="NO!";
-    wifiStateCount++;
-    //WiFi.begin();
-    if (wifiStateCount=10)
-    {
-      display.clearDisplay(); 
-      display.setTextSize(2);
-      display.setCursor(0,22);
-      display.println("Rebooting..");
-      display.display();
-      delay(2000);
-      ESP.restart();
-    }
-    WiFi.reconnect();
-  }
-}
-
-void CheckMQTTState()
-{
-  if (mqttState)
-  {
-    mqttStateMsg="OK";
-  }
-  else
-  {
-    mqttStateMsg="NO!";
-  }
-}
-
-void OledPrint()
-{
-    String msgConfigError = "-"; //"not configured";
-    String msgSensorStabilization = "Sensor stabilization";
-    String messageFlower1 = "1. Moisture -  " + String(f1_name) + "  " + String(soilMoisturePercent[0]) + " %";
-    String messageFlower2 = "2. Moisture -  " + String(f2_name) + "  " + String(soilMoisturePercent[1]) + " %";
-    String messageFlower3 = "3. Moisture -  " + String(f3_name) + "  " + String(soilMoisturePercent[2]) + " %";
-    String messageFlower4 = "4. Moisture -  " + String(f4_name) + "  " + String(soilMoisturePercent[3]) + " %";
-    
-    int activeValue[4]={atoi(f1_active), atoi(f2_active), atoi(f3_active), atoi(f4_active)};
-    String msgFlower[4]={messageFlower1,messageFlower2,messageFlower3,messageFlower4};
-    
-    for (int i = 0; i <= 3; i++)
-    {
-      if(activeValue[i]!=1)
-      {
-        msgFlower[i]=msgConfigError;
-      }
-      else
-      {
-        if (pumpError[i])
-        {
-          msgFlower[i]="Pump " +String(i+1)+ " or sensor "+String(i+1)+" failure!";
-        }
-        else if (needStabilization[i])
-        {
-          msgFlower[i]+=" "+msgSensorStabilization;
-        }
-      } 
-    }
-
-    char messageF1[msgFlower[0].length()+1];
-    strcpy(messageF1, msgFlower[0].c_str());
-
-    char messageF2[msgFlower[1].length()+1];
-    strcpy(messageF2, msgFlower[1].c_str());
-
-    char messageF3[msgFlower[2].length()+1];
-    strcpy(messageF3, msgFlower[2].c_str());
-    
-    char messageF4[msgFlower[3].length()+1];
-    strcpy(messageF4, msgFlower[3].c_str());
-    
-    int m1=strlen(messageF1);
-    int m2=strlen(messageF2);
-    int m3=strlen(messageF3);
-    int m4=strlen(messageF4);
-
-    int msgMax1 = max(m1,m2);
-    int msMax2 = max(m3,m4);
-    int finalMax = max(msgMax1,msMax2);
-    String tempUnit = "C"; //change do F if use Fahrenheit
-    String messageAirEnv = "AIR: Temperature: " + String(temp) + " " + tempUnit + "  -  " + "Humidity: " + String(humidity) + " %  -  " + "Light: " + String(lux) + " lx";
-    char message[messageAirEnv.length()+1];
-    strcpy(message, messageAirEnv.c_str());
-    
-    minX1=-6*strlen(message);
-    minX2=-6*finalMax;
-
-    display.clearDisplay();
-
-    display.setTextSize(1);
-    
-    display.setCursor(0,0);  //oled display
-    display.println("WiFi: "+wifiState +"    MQTT: "+ mqttStateMsg);
-
-    display.setCursor(xOled1,9);
-    display.print(message);
-
-    display.setCursor(xOled2,18);
-    display.print(messageF1);
-   
-    display.setCursor(xOled2,27);
-    display.print(messageF2);
-    
-    display.setCursor(xOled2,36);
-    display.print(messageF3);
-    
-    display.setCursor(xOled2,45);
-    display.print(messageF4);   
-    
-    display.setCursor(0,54);
-    display.println("WATER LEVEL: "+String(waterLvl)+" %");
-    
-    display.display();
-    xOled1=xOled1-1;//scroll speed
-    xOled2=xOled2-1;
-
-    if(xOled1<minX1) xOled1 = display.width();
-    if(xOled2<minX2) xOled2 = display.width();
-
-}
-
-void OledWatering(int flower)
-{
-  display.clearDisplay();
-  display.setTextSize(2);
-  display.setCursor(0,10);
-  display.println("Watering");
-  display.setCursor(0,40);
-  display.println("plant " +String(flower+1));
-  display.display();
-}
-
-void OledReadingSensors()
-{
-  display.clearDisplay();
-  display.setTextSize(2);
-  display.setCursor(0,22);
-  display.println("Reading");
-  display.setCursor(0,40);
-  display.println("sensors...");
-  display.display();
-}
-
-//read water lvl in tank
-void WaterLevelRead()
-{
-  WaterLevelCheck();
-  
-  if (!firstRun)
-  {
-    if (AbnormalCheck(lastDistance, currentDistance))
-    {
-      Serial.print("Abnormal water level read"); 
-    }
-    else
-    {
-      WaterLevelSet();
-    }
-  }
-  else
-  {
-    if (currentDistance < minWaterLevel)
-    {
-      WaterLevelCheck();      
-      WaterLevelSet();
-    }
-    else
-    {
-      WaterLevelSet();
-    }
-  }
- 
-  firstRun=false;
-}
-
-// Check for significant jumps and outliers in sensor reading
-bool AbnormalCheck(float lastRead, float thisRead) {
-
-  // if the difference between measures is greater then 4cm, outlier found
-  if ((lastRead - thisRead) > 4)
-  {
-    return true;
-  }
-  else
-  {
-    return false;
-  }
-}
-
-/*void WaterLevelCheck()
-{
-  lastDistance=currentDistance;
-  digitalWrite(trigPin, HIGH);
-  delayMicroseconds(2);
-  digitalWrite(trigPin, LOW);
-  delayMicroseconds(10);
-  digitalWrite(trigPin, HIGH);
-
-  h_time = pulseIn(echoPin, HIGH);
-  h_distance=h_time*0.034/2;  //h_time/58;
-  //delay(50);
-  //Serial.println(h_time);
-  currentDistance=canHeight-h_distance;
-  Serial.print(currentDistance);
-  Serial.println (" cm");
-}*/
-
-void WaterLevelCheck()
-{
-  lastDistance=currentDistance;
-  
-  int mn = 8;
-  float minValue=0;
-  float maxValue=0;
-  float sum = 0;
-  float measure=0;
-  float averageValue=0;
-  
-  for (int m = 0; m < mn; m++)
-  {
-    measure = MeasureWaterLevel();
-    if(m==0)
-    {
-      minValue=measure;
-      maxValue=measure;
-    }
-    
-    if (measure>maxValue)
-    {
-       maxValue=measure;
-    }else if (measure<minValue)
-    {
-      minValue=measure;
-    }
-    
-    sum+=measure;
-  }
-
-  averageValue=((sum-maxValue)-minValue)/(mn-2);
-  currentDistance=averageValue;
-  
-}
-
-float MeasureWaterLevel()
-{
-  digitalWrite(trigPin, HIGH);
-  delayMicroseconds(2);
-  digitalWrite(trigPin, LOW);
-  delayMicroseconds(10);
-  digitalWrite(trigPin, HIGH);
-
-  h_time = pulseIn(echoPin, HIGH);
-  h_distance=h_time*0.034/2;  //h_time/58;
-  delay(100);
-  //Serial.println(h_time);
-  currentDistance=canHeight-h_distance;
-  Serial.print(currentDistance);
-  Serial.println (" cm");
-  return currentDistance;
-}
-
-void WaterLevelSet()
-{
-  waterLvl = map(currentDistance, minWaterLevel, maxWaterLevel, 0, 100);
-  if(waterLvl > 100)
-  {
-    Serial.println("Water Level: 100 %");
-    waterLvl=100;
-  }
-  else if(waterLvl <0)
-  {
-    Serial.println("Water Level: 0 %");
-    waterLvl=0;
-  }
-  else if(waterLvl >=0 && waterLvl <= 100)
-  {
-    Serial.println("Water Level: " + String(waterLvl) + " %");
-  }
-  
-  if (currentDistance < minWaterLevel)
-  {
-    noWater=true;
-    Serial.println ("No Water!");
-    WarningLedON(); 
-  }
-  else
-  {
-    noWater=false;
-    WarningLedOFF(); 
-  }
-}
-
-void ShowSavedFlowerConfigOled()
-{
-    String messageFlower1 = "1. " + String(f1_min) + "  min/max " + String(f1_max);
-    String messageFlower2 = "2. " + String(f2_min) + " min/max " + String(f2_max);
-    String messageFlower3 = "3. " + String(f3_min) + " min/max " + String(f3_max);
-    String messageFlower4 = "4. " + String(f4_min) + " min/max " + String(f4_max);
-
-    String msgConfigError = "not configured";
-    
-    int activeValue[4]={atoi(f1_active), atoi(f2_active), atoi(f3_active), atoi(f4_active)};
-    String msgFlower[4]={messageFlower1,messageFlower2,messageFlower3,messageFlower4};
-    
-    for (int i = 0; i <= 3; i++)
-    {
-      if(activeValue[i]!=1)
-      {
-        msgFlower[i]=msgConfigError;
-      }
-      
-    }
-    
-    display.clearDisplay();
-
-    display.setTextSize(1);
-    
-    display.setCursor(0,0);  //oled display
-    display.println(WiFi.localIP());
-
-    display.setCursor(0,9);
-    display.print(msgFlower[0]);
-
-    display.setCursor(0,18);
-    display.print(msgFlower[1]);
-   
-    display.setCursor(0,27);
-    display.print(msgFlower[2]);
-    
-    display.setCursor(0,36);
-    display.print(msgFlower[3]);
-    
-    display.setCursor(0,45);
-    display.println("WiFi SSID:");   
-    
-    display.setCursor(0,54);
-    display.println(WiFi.SSID());
-    
-    display.display();
-    delay(5000);
-
-
-}
-
-void WebPage()
-{
-  WiFiClient client = server.available();   // Listen for incoming clients
-
-  if (!client)// If a new client connects,
-  {
-    return;
-  }
-  else
-  {                             
-    currentTimeWeb=millis();
-    previousTimeWeb=currentTimeWeb;
-    
-    Serial.println("New Client.");          // print a message out in the serial port
-    String currentLine = "";                // make a String to hold incoming data from the client
-    while (client.connected() && currentTimeWeb - previousTimeWeb <= timeoutTime ) {            // loop while the client's connected
-      currentTimeWeb=millis();
-      
-      if (client.available()) {             // if there's bytes to read from the client,
-        char c = client.read();             // read a byte, then
-        Serial.write(c);                    // print it out the serial monitor
-        header += c;
-        if (c == '\n') {                    // if the byte is a newline character
-          // if the current line is blank, you got two newline characters in a row.
-          // that's the end of the client HTTP request, so send a response:
-          if (currentLine.length() == 0) {
-            // HTTP headers always start with a response code (e.g. HTTP/1.1 200 OK)
-            // and a content-type so the client knows what's coming, then a blank line:
-            client.println("HTTP/1.1 200 OK");
-            client.println("Content-type:text/html");
-            client.println("Connection: close");
-            client.println();
-            
-            /*// turns the GPIOs on and off
-            if (header.indexOf("GET /5/on") >= 0) {
-              Serial.println("GPIO 5 on");
-              //output5State = "on";
-              //digitalWrite(output5, HIGH);
-            } else if (header.indexOf("GET /5/off") >= 0) {
-              Serial.println("GPIO 5 off");
-              //output5State = "off";
-              //digitalWrite(output5, LOW);
-            } else if (header.indexOf("GET /4/on") >= 0) {
-              Serial.println("GPIO 4 on");
-              //output4State = "on";
-             // digitalWrite(output4, HIGH);
-            } else if (header.indexOf("GET /4/off") >= 0) {
-              Serial.println("GPIO 4 off");
-              //output4State = "off";
-             // digitalWrite(output4, LOW);
-            }*/
-            
-            // Display the HTML web page
-            client.println("<!DOCTYPE html><html>");
-            client.println("<head><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">");
-            client.println("<link rel=\"stylesheet\" href=\"https://use.fontawesome.com/releases/v5.7.2/css/all.css\" integrity=\"sha384-fnmOCqbTlWIlj8LyTjo7mOUStjsKC4pOpQbqyi7RrhN7udi9RwhKkMHpvLbHG9Sr\" crossorigin=\"anonymous\">");                          
-            client.println("<style>");
-            client.println("*{box-sizing: border-box;}");
-            client.println("html { font-family: Arial; display: inline-block; margin: 0px auto; text-align: center; color: white;}");
-            client.println("h1 { font-size: 3.0rem;}");    
-            client.println("h2 { font-size: 2.0rem;}");
-            client.println("p { font-size: 2.0rem;}");
-            client.println(".units { font-size: 1.2rem;}");
-            client.println(".labels{ font-size: 1.5rem; vertical-align:middle; padding-bottom: 15px;}");
-            client.println(".labels2{ font-size: 1rem; vertical-align:middle; padding-bottom: 15px;}");
-            client.println(".column{ float:left; width:50%; padding: 10px;}");
-            client.println(".row:after{ display: table; clear: both;}");
-            client.println("</style>");
-            //client.println("<script>function refresh(refreshPeriod){setTimeout(\"location.reload(true);\", refreshPeriod);} window.onload = refresh(30000)</script>");
-            client.println("</head>");
-            // Web Page Heading
-            client.println("<body style=\"background-color:#242424;\"><h1>Watering Station</h1>");
-            client.println("<h2>Air:</h2>");      
-
-            client.println("<div class=\"row\"><div class=\"column\">");
-            client.println("<p><i class=\"fas fa-sun\" style=\"color:#f2f20d;\"></i> <span class=\"labels\">Light:</span> <span>"+(String)lux+"</span> <sup class=\"units\">lx</sup></p>");
-            client.println("<p><i class=\"fas fa-water\" style=\"color:#00add6;\"></i> <span class=\"labels\">Water Level:</span> <span>"+(String)waterLvl+"</span> <sup class=\"units\">&percnt;</sup></p>");
-            client.println("</div><div class=\"column\">");
-            client.println("<p><i class=\"fas fa-thermometer-half\" style=\"color:#059e8a;\"></i> <span class=\"labels\">Temperature:</span> <span>"+(String)temp+"</span> <sup class=\"units\">&deg;C</sup></p>");
-            client.println("<p><i class=\"fas fa-tint\" style=\"color:#00add6;\"></i> <span class=\"labels\">Humidity:</span> <span>"+(String)humidity+"</span> <sup class=\"units\">&percnt;</sup></p>");
-            client.println("</div></div>");
-            
-            client.println("<h2>Plants:</h2>");
-       
-            int activeValue[4]={atoi(f1_active), atoi(f2_active), atoi(f3_active), atoi(f4_active)};
-            String flowerNames[4]={String(f1_name),String(f2_name),String(f3_name),String(f4_name)};
-    
-            for (int i = 0; i <= 3; i++)
-            {
-              if(activeValue[i]==1)
-              {
-                if (pumpError[i])
-                {
-                  client.println("<p><i class=\"fas fa-seedling\" style=\"color:#00cc00;\"></i> <span>"+String(flowerNames[i])+"</span> <span class=\"labels\">Moisture:</span> <span>"+String(soilMoisturePercent[i])+"</span> <sup class=\"units\">&percnt;</sup> <span class=\"labels\">(pump or sensor error)</span></p>");
-                }
-                else
-                {
-                  if (needStabilization[i]==true)
-                  {
-                    client.println("<p><i class=\"fas fa-seedling\" style=\"color:#00cc00;\"></i> <span>"+String(flowerNames[i])+"</span> <span class=\"labels\">Moisture:</span> <span>"+String(soilMoisturePercent[i])+"</span> <sup class=\"units\">&percnt;</sup> <span class=\"labels\">(stabilization)</span></p>");
-                  }
-                  else
-                  {
-                    client.println("<p><i class=\"fas fa-seedling\" style=\"color:#00cc00;\"></i> <span>"+String(flowerNames[i])+"</span> <span class=\"labels\">Moisture:</span> <span>"+String(soilMoisturePercent[i])+"</span> <sup class=\"units\">&percnt;</sup></p>");
-                  }
-                }
-                
-                if (flowerWatering[i])
-                {
-                  client.println("<p><span class=\"labels2\">Watering is in progress</span></p>");
-                }
-                client.println("<p><span class=\"labels2\">Last watering:</span> <span class=\"labels2\">"+lastWatering[i]+"</span></p>");
-              }
-            }
-  
-            client.println("<div class=\"row\"><div class=\"column\">");
-            client.println("<p><i class=\"fas fa-stopwatch\" style=\"color:#476b6b;\"></i> <span class=\"labels\">Sensors read interval:</span> <span>"+(String(interval/60000))+"</span> <sup class=\"units\">min.</sup></p>");
-            client.println("<p><i class=\"fas fa-stopwatch\" style=\"color:#476b6b;\"></i> <span class=\"labels\">Stabilization time:</span> <span>"+(String(stabilizationTime/60000))+"</span> <sup class=\"units\">min.</sup></p>");
-            client.println("<p><span class=\"labels\">Last read:</span> <span>"+lastReadingTime+"</span></p>");
-            client.println("</div><div class=\"column\">");
-            client.println("<p><i class=\"fas fa-wifi\" style=\"color:#3366ff;\"></i> <span class=\"labels\">WIFI:</span> <span>"+WiFi.SSID()+"</span></p>");
-            client.println("<p><i class=\"fas fa-wifi\" style=\"color:#3366ff;\"></i> <span class=\"labels\">MQTT:</span> <span>"+mqttStateMsg+"</span></p>");
-            
-            client.println("</div></div>");
-            
-            client.println("</body></html>");
-            
-            // The HTTP response ends with another blank line
-            client.println();
-            // Break out of the while loop
-            break;
-          }
-          else
-          { // if you got a newline, then clear currentLine
-            currentLine = "";
-          }
-        }
-        else if (c != '\r')
-        {  // if you got anything else but a carriage return character,
-          currentLine += c;// add it to the end of the currentLine
-        }
-      }
-    }
-    // Clear the header variable
-    header = "";
-    // Close the connection
-    client.stop();
-    Serial.println("Client disconnected.");
-    Serial.println("");
   }
 }
