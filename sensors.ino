@@ -204,7 +204,7 @@ float MeasureWaterLevel()
 
 void WaterLevelSet()
 {
-  waterLvl = map(currentDistance, minWaterLevel, maxWaterLevel, 0, 100);
+  waterLvl = map(currentDistance*100, minWaterLevel*100, maxWaterLevel*100, 0, 100);
   if(waterLvl > 100)
   {
     Serial.println("Water Level: 100 %");
@@ -220,7 +220,7 @@ void WaterLevelSet()
     Serial.println("Water Level: " + String(waterLvl) + " %");
   }
   
-  if (currentDistance < minWaterLevel)
+  /*if (currentDistance < minWaterLevel)
   {
     noWater=true;
     Serial.println ("No Water!");
@@ -230,7 +230,19 @@ void WaterLevelSet()
   {
     noWater=false;
     WarningLedOFF(); 
+  }*/
+
+  if (waterLvl==0)
+  {
+    noWater=true;
+    Serial.println ("No Water!");
+    WarningLedON(); 
   }
+  else
+  {
+    noWater=false;
+    WarningLedOFF(); 
+  }  
 }
 
 //low water level led on

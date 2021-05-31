@@ -31,25 +31,6 @@ void WebPage()
             client.println("Connection: close");
             client.println();
 
-            /*// turns the GPIOs on and off
-              if (header.indexOf("GET /5/on") >= 0) {
-              Serial.println("GPIO 5 on");
-              //output5State = "on";
-              //digitalWrite(output5, HIGH);
-              } else if (header.indexOf("GET /5/off") >= 0) {
-              Serial.println("GPIO 5 off");
-              //output5State = "off";
-              //digitalWrite(output5, LOW);
-              } else if (header.indexOf("GET /4/on") >= 0) {
-              Serial.println("GPIO 4 on");
-              //output4State = "on";
-              // digitalWrite(output4, HIGH);
-              } else if (header.indexOf("GET /4/off") >= 0) {
-              Serial.println("GPIO 4 off");
-              //output4State = "off";
-              // digitalWrite(output4, LOW);
-              }*/
-
             // Display the HTML web page
             client.println("<!DOCTYPE html><html>");
             client.println("<head><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">");
