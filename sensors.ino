@@ -240,8 +240,11 @@ void WaterLevelSet()
   }
   else
   {
-    noWater=false;
-    WarningLedOFF(); 
+    if (waterLvl>=5)
+    {
+      noWater=false;
+      WarningLedOFF(); 
+    }
   }  
 }
 
