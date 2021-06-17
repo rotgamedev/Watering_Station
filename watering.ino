@@ -3,7 +3,7 @@ void WateringFlowers()
 {
   int flowerMoistureAvrg[4]={0,0,0,0};
 
-  if (isFlowerConfig && !noWater)
+  if (isFlowerConfig)
   {
     int isActive[4]={atoi(f1_active), atoi(f2_active), atoi(f3_active), atoi(f4_active)};
     int flowerMin[4]={atoi(f1_min), atoi(f2_min), atoi(f3_min), atoi(f4_min)};
@@ -21,28 +21,36 @@ void WateringFlowers()
             {
               if(soilMoisturePercent[i]<flowerMoistureAvrg[i])
               {
-                if(soilMoisturePercent[i]<=tempSoilMoisture[i])
+                if (!noWater)
                 {
-                  errorCount[i]++;
-                  if (errorCount[i]==5)
+                  if(soilMoisturePercent[i]<=tempSoilMoisture[i])
                   {
-                    pumpError[i]=true;
+                    errorCount[i]++;
+                    if (errorCount[i]==5)
+                    {
+                      pumpError[i]=true;
+                    }
+                    else
+                    {
+                      RunPump(i,wateringTime);
+                      tempSoilMoisture[i]=soilMoisturePercent[i];               
+                    }
                   }
                   else
                   {
+                    if (pumpError[i])
+                    {
+                      pumpError[i]=false;
+                    }
+                    errorCount[i]=0;
                     RunPump(i,wateringTime);
-                    tempSoilMoisture[i]=soilMoisturePercent[i];               
+                    tempSoilMoisture[i]=soilMoisturePercent[i];
                   }
                 }
                 else
                 {
-                  if (pumpError[i])
-                  {
-                    pumpError[i]=false;
-                  }
-                  errorCount[i]=0;
-                  RunPump(i,wateringTime);
-                  tempSoilMoisture[i]=soilMoisturePercent[i];
+                  flowerWatering[i]=false;
+                  Serial.println("Watering plants completed due to lack of water.");
                 }
               }
               else
@@ -54,25 +62,20 @@ void WateringFlowers()
             }        
             else if (soilMoisturePercent[i]<flowerMin[i] && !needStabilization[i])
             {
-              flowerWatering[i]=true;
-              Serial.println("Watering process started for flower no: " + String(i+1));
-              if (!pumpError[i])
+              if (!noWater)
               {
-                RunPump(i,wateringTime); //nr pompy i czas podlewania
-                tempSoilMoisture[i]=soilMoisturePercent[i]; //save temporary moisture
+                flowerWatering[i]=true;
+                Serial.println("Watering process started for flower no: " + String(i+1));
+                if (!pumpError[i])
+                {
+                  RunPump(i,wateringTime); //nr pompy i czas podlewania
+                  tempSoilMoisture[i]=soilMoisturePercent[i]; //save temporary moisture
+                }
               }
             }  
         }        
       }
     }
-  }
-  else if (noWater)
-  {
-    for (int i = 0; i <= 3; i++)
-    {
-      flowerWatering[i]=false;
-    }
-    Serial.println("Watering plants completed due to lack of water.");
   }
 }
 
