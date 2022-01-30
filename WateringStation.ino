@@ -409,14 +409,14 @@ void CheckWifiState()
   else
   {
     wifiState="NO!";
-    wifiStateCount++;
+    /*wifiStateCount++;
     //WiFi.begin();
     if (wifiStateCount==10)
     {
       OledRebooting();
       ESP.restart();
     }
-    WiFi.reconnect();
+    WiFi.reconnect();*/
   }
 }
 
