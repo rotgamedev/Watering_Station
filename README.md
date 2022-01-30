@@ -125,3 +125,5 @@ WiFiUdp.h
 ### Połączenie:
 [Schemat](https://i.imgur.com/Qk4lYX7.png)
 ![img](https://i.imgur.com/Qk4lYX7h.png)
+
+### Projekt w ciągłej rozbudowie
