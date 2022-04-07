@@ -388,6 +388,7 @@ String GetDateTime()
     int currentYear = ptm->tm_year+1900;
     String currentDate = String(currentYear) + "." + String(currentMonth) + "." + String(monthDay);
     currentDateTime = currentMonthName + ", "+ currentDate + ", " + String(timeClient.getFormattedTime());
+    Serial.println(currentDateTime);
     //currentDateTime=String(daysOfTheWeek[timeClient.getDay()])+", "+String(timeClient.getHours())+":"+String(timeClient.getMinutes())+":"+String(timeClient.getSeconds());
     //currentDateTime=String(weekDays[timeClient.getDay()])+", "+String(timeClient.getFormattedTime());
     Serial.println(timeClient.getFormattedTime());
