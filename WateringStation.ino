@@ -179,7 +179,8 @@ const long utcOffsetInSeconds = 7200;
 String weekDays[7]={"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"};
 String months[12]={"January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"};
 WiFiUDP ntpUDP;
-NTPClient timeClient(ntpUDP, "europe.pool.ntp.org", utcOffsetInSeconds);
+//NTPClient timeClient(ntpUDP, "europe.pool.ntp.org", utcOffsetInSeconds);
+NTPClient timeClient(ntpUDP, "pl.pool.ntp.org", utcOffsetInSeconds);
 
 String lastReadingTime="No reading since last run";
 String lastWatering[4]={"No watering since last run","No watering since last run","No watering since last run","No watering since last run"};
