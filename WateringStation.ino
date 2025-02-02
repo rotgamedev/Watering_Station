@@ -565,6 +565,10 @@ void Btn2Check()
     else if (pressDuration2 > shortPressTime2 && pressDuration2 < 5000)
     {
       //not used
+      for (int i = 0; i <= 3; i++)
+      {
+        RunPumpTest(i,wateringTime);
+      }
     }
     else
     {

@@ -99,3 +99,17 @@ void RunPump(int pumpNr, long duratioin)
 
   }
 }
+
+//starting the selected water pump
+void RunPumpTest(int pumpNr, long duratioin)
+{
+    pcf8574.digitalWrite(pumpNr, LOW); //run pump
+    Serial.println("Pump no: " + String(pumpNr)+" is running");
+    OledWatering(pumpNr);
+    delay(duratioin);
+    pcf8574.digitalWrite(pumpNr, HIGH); //stop pump
+    delay(250);
+    Serial.println("Pump no: " + String(pumpNr)+" has stoped");
+    needStabilization[pumpNr]=true;
+    prevTime[pumpNr]=millis(); 
+}
